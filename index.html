@@ -12,7 +12,7 @@
       <div class="group">
         <select id="new-size" title="Grid size for New">
           <option value="8">8×8</option>
-          <option value="16" selected>16×16</option>
+          <option value="16">16×16</option>
           <option value="24">24×24</option>
           <option value="32">32×32</option>
           <option value="48">48×48</option>
@@ -21,19 +21,27 @@
         <button id="btn-new">New</button>
         <button id="btn-open" title="Open .kenshape or import .svg (Ctrl+O)">Open…</button>
         <button id="btn-save" title="Save .kenshape (Ctrl+S)">Save</button>
-        <button id="btn-save-as">Save as…</button>
+        <button id="btn-save-as" title="Save as (Ctrl+Shift+S)">Save as…</button>
       </div>
       <div class="group">
         <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
         <button id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
       </div>
+      <div class="group seg" id="view-mode" title="View (` cycles)">
+        <button data-view="2d">2D</button>
+        <button data-view="split">Split</button>
+        <button data-view="3d">3D</button>
+      </div>
       <span id="status" class="status"></span>
+      <button id="btn-settings" class="icon" title="Settings">⚙</button>
     </header>
+
+    <div id="optionsbar" class="optionsbar"></div>
 
     <main class="layout">
       <aside class="panel left">
         <section>
-          <h2>Tool</h2>
+          <h2>Tools</h2>
           <div id="tools" class="tools"></div>
         </section>
         <section>
@@ -46,26 +54,71 @@
           </div>
         </section>
         <section>
-          <h2>Colour <span class="hint">double-click edits</span></h2>
+          <h2>Colour <span id="palette-count" class="hint"></span></h2>
+          <div class="current-color">
+            <button id="current-swatch" class="current-swatch" title="Edit this colour"></button>
+            <div>
+              <div id="current-hex" class="mono"></div>
+              <div class="hint">Click to edit · double-click a swatch</div>
+            </div>
+          </div>
           <div id="palette" class="palette"></div>
-          <input id="color-edit" type="color" class="hidden" />
+          <div class="row">
+            <button id="btn-add-color" title="Add a new colour to the palette">+ Add</button>
+            <button id="btn-del-color" title="Remove the selected colour">Remove</button>
+          </div>
         </section>
         <section>
-          <h2>Depth</h2>
-          <div class="row">
-            <input id="depth" type="range" min="1" max="10" value="1" />
-            <span id="depth-label" class="mono">1</span>
+          <h2>Depth <span class="hint">[ and ] change</span></h2>
+          <div class="row tight">
+            <span class="label">Brush</span>
+            <div class="stepper" id="brush-depth"></div>
           </div>
-          <label class="check"><input id="show-depth" type="checkbox" /> Show depth numbers</label>
+          <label>Canvas shows
+            <select id="depth-view">
+              <option value="off">Colours</option>
+              <option value="numbers">Colours + depth numbers</option>
+              <option value="map">Depth map</option>
+            </select>
+          </label>
+          <p class="hint">The Depth tool (D) shows the depth map while it's active.</p>
         </section>
       </aside>
 
-      <section class="canvas-wrap" id="canvas-wrap">
-        <div id="canvas" class="canvas"></div>
-        <div class="drop-hint">Drop a .kenshape or .svg here</div>
+      <section class="workspace view-split" id="workspace">
+        <div class="canvas-wrap" id="canvas-wrap">
+          <div id="canvas" class="canvas"></div>
+          <div id="depth-legend" class="depth-legend hidden"></div>
+          <div class="drop-hint">Drop a .kenshape or .svg here</div>
+        </div>
+        <div class="view3d" id="view3d">
+          <button id="btn-reset-view" class="overlay-btn" title="Reset camera">Reset view</button>
+          <span class="overlay-hint">Drag to orbit · right-drag to pan · scroll to zoom</span>
+        </div>
       </section>
 
       <aside class="panel right">
+        <section id="selection-panel" class="selection-panel hidden">
+          <h2>Selection <span id="sel-count" class="hint"></span></h2>
+          <div class="btn-grid">
+            <button id="sel-color" title="Recolour selected tiles with the current colour">Apply colour</button>
+            <button id="sel-shape" title="Give selected tiles the current shape and rotation">Apply shape</button>
+          </div>
+          <div class="row">
+            <span class="label">Depth</span>
+            <div class="stepper" id="sel-depth"></div>
+          </div>
+          <div class="btn-grid four">
+            <button id="sel-rot-ccw" title="Rotate selection left">⟲ 90°</button>
+            <button id="sel-rot-cw" title="Rotate selection right">⟳ 90°</button>
+            <button id="sel-flip-x" title="Flip horizontally">⇋ Flip</button>
+            <button id="sel-flip-y" title="Flip vertically">⇵ Flip</button>
+          </div>
+          <div class="btn-grid">
+            <button id="sel-delete" title="Delete selected tiles (Del)">Delete</button>
+            <button id="sel-none" title="Deselect (Ctrl+D)">Deselect</button>
+          </div>
+        </section>
         <section>
           <h2>Preview</h2>
           <div class="previews">
@@ -87,6 +140,35 @@
           </label>
           <label class="check"><input id="png-crisp" type="checkbox" /> No anti-aliasing</label>
           <button id="btn-export-png" class="wide">Export PNG</button>
+        </section>
+        <section>
+          <h2>3D model</h2>
+          <label>Depth scale
+            <span class="row tight">
+              <input id="depth-mult" type="range" min="10" max="300" step="10" value="100" />
+              <span id="depth-mult-label" class="mono">100%</span>
+            </span>
+          </label>
+          <label>Format
+            <select id="model-format">
+              <option value="glb">glTF binary (.glb)</option>
+              <option value="obj">Wavefront (.obj + .mtl)</option>
+            </select>
+          </label>
+          <label>Scale
+            <select id="model-scale">
+              <option value="tile">1 tile = 1 unit</option>
+              <option value="fit">Fit in 1 unit</option>
+            </select>
+          </label>
+          <label>Origin
+            <select id="model-pivot">
+              <option value="center">Centre</option>
+              <option value="bottom">Bottom centre</option>
+            </select>
+          </label>
+          <button id="btn-export-model" class="wide">Export 3D model</button>
+          <p id="model-stats" class="hint"></p>
         </section>
         <section>
           <h2>SVG import</h2>

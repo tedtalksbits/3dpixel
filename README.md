@@ -16,10 +16,33 @@ other browsers download a copy instead.
 
 - **Open and save `.kenshape`** files from Kenney Shape, including its samples. Fields it doesn't
   use are kept on save.
-- **Draw** with all 22 Kenney shapes in 4 rotations, using a 16-colour palette and per-tile depth.
+- **Draw** with all 22 Kenney shapes in 4 rotations. Choose whether painting over a tile changes
+  its shape, colour, depth, or any mix of the three.
+- **Depth editing:**
+  - The Depth tool sets tiles to the brush depth, or raises or lowers them by 1, without touching
+    shape or colour.
+  - A depth-map view shades tiles by thickness and shows their numbers.
+  - `[` and `]` change the depth of the selection, or of the brush when nothing is selected.
+- **Selections, Photoshop-style:**
+  - Select with a rectangle or the magic wand.
+  - Move by dragging or with the arrow keys. With nothing selected, Move shifts the whole drawing.
+  - Copy, cut, paste and delete.
+  - Recolour, reshape, change depth, rotate or flip selected tiles in bulk. Rotating and flipping
+    swap in the correctly mirrored shapes.
+  - Moved tiles stay "floating" until dropped, so nudging them past the edge doesn't lose them.
+- **Colour:**
+  - A full colour picker with hex and RGB fields, recent colours and a screen eyedropper.
+  - A palette you can add to and remove from. Removing a colour moves its tiles to the closest
+    remaining colour.
+- **Settings** (gear icon) for the 3D background and floor grid, canvas checker and grid lines,
+  selection and accent colours, text size, and default sizes. They're saved in the browser.
 - **Export SVG**, either one path per tile (identical to Kenney Shape's export) or merged per colour,
   which leaves no hairline seams.
 - **Export PNG** at any size, e.g. 64×64, with optional no-anti-aliasing.
+- **3D preview and export:** tiles are extruded by their depth, the same way Kenney Shape does it.
+  Walls hidden between neighbouring tiles are removed. Export as glTF binary (`.glb`) or OBJ + MTL,
+  with one material per palette colour. You can choose 1 tile = 1 unit or fit the model in 1 unit,
+  and put the origin at the centre or the bottom centre.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -30,16 +53,28 @@ other browsers download a copy instead.
 
 | Input | Action |
 | --- | --- |
-| Left drag | Paint with the current tool |
-| Right drag | Erase |
+| V / M / W | Move / Select / Magic wand |
+| B / E / G / D / I | Draw / Erase / Fill / Depth / Pick |
+| Left drag | Use the current tool |
+| Right drag | Erase (Draw), opposite direction (Depth), sample depth (Depth in Set mode) |
 | Alt + click | Pick shape, angle, colour and depth from a tile |
-| B / E / G / I | Draw / Erase / Fill / Pick |
-| R / Shift+R | Rotate shape |
+| Shift / Alt while selecting | Add to / subtract from the selection |
+| Ctrl + drag | Move the selection with any tool |
+| Arrow keys / Shift+arrows | Nudge selection, or the whole drawing with Move, by 1 / 4 tiles |
+| Enter | Drop floating tiles |
+| Esc | Drop and deselect |
+| Delete / Backspace | Delete selected tiles |
+| Ctrl+A / Ctrl+D / Ctrl+Shift+I | Select all / Deselect / Invert |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / Cut / Paste |
+| [ / ] | Lower / raise depth of the selection, or of the brush |
 | 1–9, 0 | Brush depth 1–10 |
+| R / Shift+R | Rotate the brush shape |
+| ` | Cycle 2D / Split / 3D view |
+| Drag / right-drag / scroll in 3D | Orbit / pan / zoom |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
 | Ctrl+O | Open |
-| Double-click swatch | Edit colour |
+| Click current colour, or double-click a swatch | Edit colour |
 
 You can also drop a `.kenshape` or `.svg` file onto the canvas.
 
@@ -49,5 +84,11 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas.
 - `src/shapes.ts`: shape table (SVG path per shape and angle)
 - `src/svgExport.ts`: SVG and PNG export
 - `src/svgImport.ts`: exact and fitted SVG import
-- `src/main.ts`: editor UI
+- `src/mesh.ts`: extrudes tiles into a mesh, one part per colour
+- `src/modelExport.ts`: GLB and OBJ export
+- `src/preview3d.ts`: Three.js viewport
+- `src/transform.ts`: which shape and rotation a tile becomes when flipped or rotated
+- `src/colorPicker.ts`: colour picker popover
+- `src/settings.ts`: preferences and the settings dialog
+- `src/main.ts`: editor UI, tools and selection
 - `docs/kenshape-format.md`: file format notes

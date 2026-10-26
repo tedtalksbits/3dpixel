@@ -56,6 +56,20 @@ Each tile is 32×32 units in SVG export. Kenney Shape writes a tile as
 The `slant*` and `circle*Bottom` shapes come in mirrored pairs; Kenney Shape uses the
 pair to mirror a drawing.
 
+## 3D model
+
+Kenney Shape builds its model from one extruded prism per tile:
+
+- One tile is 1 unit and the grid is centred on the origin, with +Y up.
+- A tile reaches `depth / 2` towards the front and `depthBack / 2` towards the back. If
+  `depthBack` is 0 it uses `depth`; if both are 0, both become 1.
+- The whole depth axis is scaled by `depthMultiplier / 100`.
+- The back face uses `colorBack` when it is set.
+- `alignment` only affects its voxel (.vox) export, not the mesh.
+
+This editor follows the same rules in `src/mesh.ts`. It uses glTF's convention of +Z towards
+the viewer; Unity's is the opposite.
+
 ## SVG export
 
 Kenney Shape's SVG has `viewBox="0 0 {size.x*32} {size.y*32}"` and one `<path>` per
