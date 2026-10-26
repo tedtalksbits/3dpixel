@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3dpixel</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="brand">3dpixel</span>
+      <input id="title" class="title" spellcheck="false" title="Project title" />
+      <div class="group">
+        <select id="new-size" title="Grid size for New">
+          <option value="8">8×8</option>
+          <option value="16" selected>16×16</option>
+          <option value="24">24×24</option>
+          <option value="32">32×32</option>
+          <option value="48">48×48</option>
+          <option value="64">64×64</option>
+        </select>
+        <button id="btn-new">New</button>
+        <button id="btn-open" title="Open .kenshape or import .svg (Ctrl+O)">Open…</button>
+        <button id="btn-save" title="Save .kenshape (Ctrl+S)">Save</button>
+        <button id="btn-save-as">Save as…</button>
+      </div>
+      <div class="group">
+        <button id="btn-undo" title="Undo (Ctrl+Z)">Undo</button>
+        <button id="btn-redo" title="Redo (Ctrl+Y)">Redo</button>
+      </div>
+      <span id="status" class="status"></span>
+    </header>
+
+    <main class="layout">
+      <aside class="panel left">
+        <section>
+          <h2>Tool</h2>
+          <div id="tools" class="tools"></div>
+        </section>
+        <section>
+          <h2>Shape <span class="hint">R rotates</span></h2>
+          <div id="shapes" class="shapes"></div>
+          <div class="row">
+            <button id="rot-ccw" title="Rotate left (Shift+R)">⟲</button>
+            <span id="angle-label" class="mono"></span>
+            <button id="rot-cw" title="Rotate right (R)">⟳</button>
+          </div>
+        </section>
+        <section>
+          <h2>Colour <span class="hint">double-click edits</span></h2>
+          <div id="palette" class="palette"></div>
+          <input id="color-edit" type="color" class="hidden" />
+        </section>
+        <section>
+          <h2>Depth</h2>
+          <div class="row">
+            <input id="depth" type="range" min="1" max="10" value="1" />
+            <span id="depth-label" class="mono">1</span>
+          </div>
+          <label class="check"><input id="show-depth" type="checkbox" /> Show depth numbers</label>
+        </section>
+      </aside>
+
+      <section class="canvas-wrap" id="canvas-wrap">
+        <div id="canvas" class="canvas"></div>
+        <div class="drop-hint">Drop a .kenshape or .svg here</div>
+      </section>
+
+      <aside class="panel right">
+        <section>
+          <h2>Preview</h2>
+          <div class="previews">
+            <img id="preview-small" alt="Preview at export size" />
+            <img id="preview-large" alt="Preview" />
+          </div>
+        </section>
+        <section>
+          <h2>Export</h2>
+          <label>SVG grouping
+            <select id="svg-grouping">
+              <option value="shape">Per tile (Kenney Shape style)</option>
+              <option value="color">Merged per colour (no seams)</option>
+            </select>
+          </label>
+          <button id="btn-export-svg" class="wide">Export SVG</button>
+          <label>PNG size (px)
+            <input id="png-size" type="number" min="1" max="4096" value="64" />
+          </label>
+          <label class="check"><input id="png-crisp" type="checkbox" /> No anti-aliasing</label>
+          <button id="btn-export-png" class="wide">Export PNG</button>
+        </section>
+        <section>
+          <h2>SVG import</h2>
+          <label>Palette
+            <select id="import-palette">
+              <option value="svg">Use the SVG's colours</option>
+              <option value="project">Snap to current palette</option>
+            </select>
+          </label>
+          <label>Fit to grid
+            <select id="import-grid">
+              <option value="current" selected>Current grid size</option>
+              <option value="8">8×8</option>
+              <option value="16">16×16</option>
+              <option value="24">24×24</option>
+              <option value="32">32×32</option>
+              <option value="48">48×48</option>
+              <option value="64">64×64</option>
+            </select>
+          </label>
+          <p class="hint">SVGs exported by Kenney Shape or this editor import exactly. Other SVGs are fitted to the grid, choosing the best shape and colour for each tile.</p>
+          <button id="btn-import-svg" class="wide">Import SVG…</button>
+        </section>
+      </aside>
+    </main>
+
+    <input id="file-input" type="file" accept=".kenshape,.svg" class="hidden" />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
