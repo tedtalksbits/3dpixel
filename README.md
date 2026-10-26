@@ -4,6 +4,23 @@ A local web editor for tile-shape game assets, compatible with Kenney Shape's `.
 
 ## Run
 
+There are two ways to run it from the same code: a desktop app (Tauri v2) and a web page.
+
+### Desktop app
+
+Needs [Rust](https://rustup.rs) and the Visual Studio C++ build tools. WebView2 ships with Windows 11.
+
+```bash
+npm install
+npm run desktop
+```
+
+`npm run desktop:build` makes the release app and the Windows installers in
+`src-tauri/target/release/bundle/`. The installer registers `.kenshape` files, so double-clicking
+one opens it in 3dpixel.
+
+### Web
+
 ```bash
 npm install
 npm run dev
@@ -43,6 +60,12 @@ other browsers download a copy instead.
   Walls hidden between neighbouring tiles are removed. Export as glTF binary (`.glb`) or OBJ + MTL,
   with one material per palette colour. You can choose 1 tile = 1 unit or fit the model in 1 unit,
   and put the origin at the centre or the bottom centre.
+- **Export on save** (desktop app): give a project a list of export targets, such as
+  `../game/assets/sword.glb` and a 64×64 PNG, and every Ctrl+S rewrites them. Each target keeps its
+  own options (PNG size, SVG grouping, model scale and origin), and missing folders are created.
+  Paths are stored in the `.kenshape` relative to it, so the project can move along with your game.
+  Kenney Shape ignores this list, but drops it if Kenney Shape saves the file. **Export now** writes
+  the targets without saving.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -76,7 +99,8 @@ other browsers download a copy instead.
 | Ctrl+O | Open |
 | Click current colour, or double-click a swatch | Edit colour |
 
-You can also drop a `.kenshape` or `.svg` file onto the canvas.
+You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop app a dropped
+`.kenshape` keeps its path, so Save writes back to it.
 
 ## Layout
 
@@ -90,5 +114,8 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas.
 - `src/transform.ts`: which shape and rotation a tile becomes when flipped or rotated
 - `src/colorPicker.ts`: colour picker popover
 - `src/settings.ts`: preferences and the settings dialog
+- `src/platform.ts`: file dialogs, reading and writing, and window integration, for both the browser and the desktop app
+- `src/autoExport.ts`: export-on-save targets
 - `src/main.ts`: editor UI, tools and selection
+- `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

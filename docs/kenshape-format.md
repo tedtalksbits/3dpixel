@@ -76,3 +76,22 @@ Kenney Shape's SVG has `viewBox="0 0 {size.x*32} {size.y*32}"` and one `<path>` 
 tile (or one per colour, made by joining the tile paths). Because the tile paths are
 fixed strings, these SVGs can be turned back into tiles exactly, which is what this
 editor's SVG import does first.
+
+## 3dpixel extension: `autoExport`
+
+3dpixel can store an extra top-level key with the project's export-on-save targets:
+
+```json
+"autoExport": {
+  "enabled": true,
+  "targets": [
+    { "format": "glb", "path": "../game/assets/sword.glb", "scale": "tile", "pivot": "bottom" },
+    { "format": "png", "path": "../game/assets/sword.png", "size": 64, "crisp": true }
+  ]
+}
+```
+
+`format` is `glb`, `obj` (writes a `.mtl` beside it), `png` or `svg` (`grouping`: `shape` or
+`color`). `path` is relative to the `.kenshape` file, with forward slashes, or absolute if it's on
+another drive. Unity's JsonUtility ignores unknown keys, so Kenney Shape still opens the file, but
+it doesn't keep the key when it saves.

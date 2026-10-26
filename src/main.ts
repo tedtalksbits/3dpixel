@@ -9,6 +9,11 @@ import { tileDepths } from './mesh';
 import { transformShape, ShapeXf } from './transform';
 import { openColorPicker, hexToRgb } from './colorPicker';
 import { settings, onSettingsChange, openSettings } from './settings';
+import * as platform from './platform';
+import { FileRef, FileType } from './platform';
+import {
+  AutoExport, ExportTarget, TargetFormat, FORMATS, emptyAutoExport, takeAutoExport, withAutoExport, storePath, targetAbsPath, runAutoExport,
+} from './autoExport';
 
 type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick';
 type DepthMode = 'set' | 'raise' | 'lower';
@@ -63,8 +68,8 @@ const state = {
   hover: null as { x: number; y: number } | null,
   undo: [] as Snapshot[],
   redo: [] as Snapshot[],
-  fileHandle: null as any,
-  fileName: '',
+  file: null as FileRef | null,
+  autoExport: emptyAutoExport() as AutoExport,
   dirty: false,
 };
 
@@ -105,14 +110,14 @@ function redo() {
   renderAll();
 }
 
-function setProject(p: Project, fileName = '', handle: any = null) {
+function setProject(p: Project, file: FileRef | null = null) {
+  state.autoExport = takeAutoExport(p);
   state.project = p;
   state.undo = [];
   state.redo = [];
   state.sel.clear();
   state.float = null;
-  state.fileName = fileName;
-  state.fileHandle = handle;
+  state.file = file;
   state.dirty = false;
   if (state.color >= p.colors.length) state.color = 0;
   renderAll();
@@ -757,10 +762,13 @@ function renderPanels() {
     syncSelDepth();
   }
 
+  const name = state.file?.name || 'unsaved';
   if (!toastActive) {
     const { x, y } = state.project.size;
-    $('status').textContent = `${state.fileName || 'unsaved'}${state.dirty ? ' •' : ''} · ${x}×${y}`;
+    $('status').textContent = `${name}${state.dirty ? ' •' : ''} · ${x}×${y}`;
   }
+  platform.setWindowTitle(`${name}${state.dirty ? ' •' : ''} — 3dpixel`);
+  renderAutoExport();
 }
 
 function renderOptions() {
@@ -1034,13 +1042,22 @@ $('btn-export-model').addEventListener('click', async () => {
   try {
     const opts = modelOpts();
     if ($<HTMLSelectElement>('model-format').value === 'glb') {
-      const res = await saveBlob(await exportGlb(state.project, opts), `${safeName()}.glb`, '.glb', 'glTF binary', 'model/gltf-binary');
+      const res = await platform.saveFile(await exportGlb(state.project, opts), `${safeName()}.glb`, FORMATS.glb);
       if (res) flash(`Exported ${res.name}`);
+    } else if (platform.isDesktop) {
+      const path = await platform.pickSavePath(`${safeName()}.obj`, FORMATS.obj, state.file?.path);
+      if (path) {
+        const mtlPath = platform.stripExt(path) + '.mtl';
+        const { obj, mtl } = exportObj(state.project, platform.basename(mtlPath), opts);
+        await platform.writePath(path, obj);
+        await platform.writePath(mtlPath, mtl);
+        flash(`Exported ${platform.basename(path)} and ${platform.basename(mtlPath)}`);
+      }
     } else {
       const { obj, mtl } = exportObj(state.project, `${safeName()}.mtl`, opts);
       // the .obj refers to the .mtl by name, so both go to the downloads folder side by side
-      download(new Blob([obj], { type: 'text/plain' }), `${safeName()}.obj`);
-      download(new Blob([mtl], { type: 'text/plain' }), `${safeName()}.mtl`);
+      platform.download(new Blob([obj], { type: 'text/plain' }), `${safeName()}.obj`);
+      platform.download(new Blob([mtl], { type: 'text/plain' }), `${safeName()}.mtl`);
       flash(`Downloaded ${safeName()}.obj and ${safeName()}.mtl`);
     }
   } catch (err: any) {
@@ -1061,56 +1078,50 @@ function renderAll() {
 
 // ---------- files ----------
 
-const w = window as any;
-const hasFsApi = typeof w.showSaveFilePicker === 'function';
-
-function download(blob: Blob, name: string) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
+const KENSHAPE: FileType = { description: 'Kenney Shape project', ext: 'kenshape', mime: 'application/octet-stream' };
+const SVG: FileType = { description: 'SVG image', ext: 'svg', mime: 'image/svg+xml' };
 
 const safeName = () => state.project.title.replace(/[^\w\- ]+/g, '').trim() || 'shape';
 
-async function saveBlob(blob: Blob, suggested: string, ext: string, desc: string, mime: string, handle?: any) {
-  if (!hasFsApi) {
-    download(blob, suggested);
-    return { name: suggested, handle: null };
-  }
-  try {
-    const h =
-      handle ??
-      (await w.showSaveFilePicker({ suggestedName: suggested, types: [{ description: desc, accept: { [mime]: [ext] } }] }));
-    const ws = await h.createWritable();
-    await ws.write(blob);
-    await ws.close();
-    return { name: h.name as string, handle: h };
-  } catch (err: any) {
-    if (err?.name === 'AbortError') return null;
-    throw err;
-  }
-}
-
 async function save(as = false) {
   commitFloat();
-  const blob = await writeKenshape(state.project);
-  const res = await saveBlob(blob, `${safeName()}.kenshape`, '.kenshape', 'Kenney Shape project', 'application/octet-stream', as ? undefined : state.fileHandle ?? undefined);
-  if (!res) return;
-  state.fileName = res.name;
-  state.fileHandle = res.handle;
-  state.dirty = false;
-  flash(`Saved ${res.name}`);
+  try {
+    const blob = await writeKenshape(withAutoExport(state.project, state.autoExport));
+    const prevPath = state.file?.path;
+    const res = await platform.saveFile(blob, `${safeName()}.kenshape`, KENSHAPE, as ? null : state.file);
+    if (!res) return;
+    // export paths are stored relative to the project file, so keep them pointing at the same
+    // files when Save as moves the project to another folder
+    if (prevPath && res.path && prevPath !== res.path && state.autoExport.targets.length) {
+      for (const t of state.autoExport.targets) t.path = storePath(res.path, targetAbsPath(prevPath, t));
+      await platform.writePath(res.path, await writeKenshape(withAutoExport(state.project, state.autoExport)));
+    }
+    state.file = res;
+    state.dirty = false;
+    const exported = await exportOnSave();
+    flash(`Saved ${res.name}${exported}`, exported.includes('failed'));
+  } catch (err: any) {
+    flash(`Save failed: ${err?.message ?? err}`, true);
+  }
   renderAll();
 }
 
-async function openFile(file: File, handle: any = null) {
+/** Runs the project's export targets; returns a note for the status line. */
+async function exportOnSave(force = false): Promise<string> {
+  const cfg = state.autoExport;
+  const path = state.file?.path;
+  if (!platform.isDesktop || !path || !cfg.targets.length || (!cfg.enabled && !force)) return '';
+  const res = await runAutoExport(state.project, path, cfg);
+  if (res.errors.length) return ` · export failed: ${res.errors.join('; ')}`;
+  return ` · exported ${res.written.length} file${res.written.length === 1 ? '' : 's'}`;
+}
+
+async function openFile(file: File, ref: FileRef | null = null) {
   try {
     if (file.name.toLowerCase().endsWith('.svg')) {
       await doImportSvg(await file.text(), file.name);
     } else {
-      setProject(await readKenshape(await file.arrayBuffer()), file.name, handle);
+      setProject(await readKenshape(await file.arrayBuffer()), ref ?? { name: file.name });
       flash(`Opened ${file.name}`);
     }
   } catch (err: any) {
@@ -1130,7 +1141,7 @@ async function doImportSvg(text: string, name: string) {
   res.project.title = name.replace(/\.svg$/i, '');
   commitFloat();
   const prev = snapshot();
-  setProject(res.project, '');
+  setProject(res.project);
   state.undo = [prev];
   state.dirty = true;
   renderAll();
@@ -1138,18 +1149,12 @@ async function doImportSvg(text: string, name: string) {
 }
 
 async function pickOpen(accept: 'any' | 'svg') {
-  if (typeof w.showOpenFilePicker === 'function') {
+  if (platform.canPickFile) {
     try {
-      const types =
-        accept === 'svg'
-          ? [{ description: 'SVG image', accept: { 'image/svg+xml': ['.svg'] } }]
-          : [
-              { description: 'Kenney Shape project or SVG', accept: { 'application/octet-stream': ['.kenshape'], 'image/svg+xml': ['.svg'] } },
-            ];
-      const [h] = await w.showOpenFilePicker({ types });
-      await openFile(await h.getFile(), h);
+      const picked = await platform.pickFile(accept === 'svg' ? [SVG] : [KENSHAPE, SVG]);
+      if (picked) await openFile(picked.file, picked.ref);
     } catch (err: any) {
-      if (err?.name !== 'AbortError') flash(String(err?.message ?? err), true);
+      flash(String(err?.message ?? err), true);
     }
     return;
   }
@@ -1165,22 +1170,132 @@ $<HTMLInputElement>('file-input').addEventListener('change', (e) => {
   input.value = '';
 });
 
-$('btn-new').addEventListener('click', () => {
-  if (state.dirty && !confirm('Discard unsaved changes?')) return;
+const discardOk = async () => !state.dirty || platform.confirmDiscard();
+
+$('btn-new').addEventListener('click', async () => {
+  if (!(await discardOk())) return;
   const n = +$<HTMLSelectElement>('new-size').value;
   const p = newProject(n);
   p.colors = [...state.project.colors];
   setProject(p);
 });
-$('btn-open').addEventListener('click', () => {
-  if (state.dirty && !confirm('Discard unsaved changes?')) return;
-  pickOpen('any');
+$('btn-open').addEventListener('click', async () => {
+  if (await discardOk()) pickOpen('any');
 });
 $('btn-save').addEventListener('click', () => save());
 $('btn-save-as').addEventListener('click', () => save(true));
 $('btn-undo').addEventListener('click', undo);
 $('btn-redo').addEventListener('click', redo);
 $('btn-import-svg').addEventListener('click', () => pickOpen('svg'));
+
+// ---------- export on save ----------
+
+const autoExportChanged = () => {
+  state.dirty = true;
+  renderPanels();
+};
+
+function targetOptions(t: ExportTarget, i: number) {
+  const sel = (key: string, value: string, items: [string, string][]) =>
+    `<select data-target="${i}" data-key="${key}">${items.map(([v, l]) => `<option value="${v}"${v === value ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+  switch (t.format) {
+    case 'png':
+      return `<input type="number" min="1" max="4096" data-target="${i}" data-key="size" value="${t.size ?? 64}" title="Size in pixels" />
+        <label class="check" title="No anti-aliasing"><input type="checkbox" data-target="${i}" data-key="crisp"${t.crisp ? ' checked' : ''} /> Crisp</label>`;
+    case 'svg':
+      return sel('grouping', t.grouping ?? 'shape', [['shape', 'Per tile'], ['color', 'Per colour']]);
+    default:
+      return (
+        sel('scale', t.scale ?? 'tile', [['tile', '1 tile = 1'], ['fit', 'Fit in 1']]) +
+        sel('pivot', t.pivot ?? 'center', [['center', 'Centre'], ['bottom', 'Bottom']])
+      );
+  }
+}
+
+function renderAutoExport() {
+  const host = $('auto-export');
+  if (!platform.isDesktop) {
+    host.innerHTML = `<p class="hint">In the desktop app, saving can also write GLB, OBJ, PNG and SVG files straight into your game's asset folders.</p>`;
+    return;
+  }
+  // skip re-rendering while the user is typing in one of the target fields
+  if (host.contains(document.activeElement) && document.activeElement?.matches('input[type=number]')) return;
+  const cfg = state.autoExport;
+  const path = state.file?.path;
+  const rows = cfg.targets
+    .map((t, i) => {
+      const full = path ? targetAbsPath(path, t) : t.path;
+      return `<div class="target">
+        <div class="target-head">
+          <span class="badge">${FORMATS[t.format].label}</span>
+          <span class="target-path" title="${escapeHtml(full)}"><span class="target-file">${escapeHtml(platform.basename(t.path))}</span><span class="target-dir mono">${escapeHtml(platform.dirname(t.path) || '.')}</span></span>
+          <button class="icon small" data-target-remove="${i}" title="Remove this target">×</button>
+        </div>
+        <div class="target-opts">${targetOptions(t, i)}</div>
+      </div>`;
+    })
+    .join('');
+  host.innerHTML = `
+    <label class="check"><input type="checkbox" id="auto-export-on"${cfg.enabled ? ' checked' : ''} /> Export when saving</label>
+    ${rows || `<p class="hint">No targets yet. Add one to write that file every time you save.</p>`}
+    <div class="row">
+      <select id="auto-export-add" title="Add an export target">
+        <option value="">+ Add target</option>
+        ${Object.entries(FORMATS).map(([k, f]) => `<option value="${k}">${f.label} · ${f.description}</option>`).join('')}
+      </select>
+      <button id="auto-export-run"${cfg.targets.length && path ? '' : ' disabled'} title="Write all targets now">Export now</button>
+    </div>
+    ${path ? '' : `<p class="hint">Save the project first. Target paths are stored relative to the .kenshape file.</p>`}`;
+}
+
+const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+async function addTarget(format: TargetFormat) {
+  const path = state.file?.path;
+  const abs = await platform.pickSavePath(`${safeName()}.${FORMATS[format].ext}`, FORMATS[format], path);
+  if (!abs) return;
+  // new targets start from the current Export / 3D model panel settings
+  const t: ExportTarget = { format, path: storePath(path, abs).replace(/\\/g, '/') };
+  if (format === 'png') Object.assign(t, { size: pngSize(), crisp: $<HTMLInputElement>('png-crisp').checked });
+  if (format === 'svg') t.grouping = $<HTMLSelectElement>('svg-grouping').value as SvgGrouping;
+  if (format === 'glb' || format === 'obj') Object.assign(t, modelOpts());
+  state.autoExport.targets.push(t);
+  autoExportChanged();
+}
+
+const autoHost = $('auto-export');
+autoHost.addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement | HTMLSelectElement;
+  if (el.id === 'auto-export-on') {
+    state.autoExport.enabled = (el as HTMLInputElement).checked;
+    return autoExportChanged();
+  }
+  if (el.id === 'auto-export-add') {
+    const format = el.value as TargetFormat;
+    el.value = '';
+    if (format) addTarget(format);
+    return;
+  }
+  const t = state.autoExport.targets[+(el.dataset.target ?? -1)];
+  if (!t) return;
+  const key = el.dataset.key!;
+  if (key === 'size') t.size = Math.max(1, Math.min(4096, Math.round(+el.value || 64)));
+  else if (key === 'crisp') t.crisp = (el as HTMLInputElement).checked;
+  else (t as any)[key] = el.value;
+  autoExportChanged();
+});
+autoHost.addEventListener('click', async (e) => {
+  const el = (e.target as HTMLElement).closest('button');
+  if (!el) return;
+  if (el.dataset.targetRemove) {
+    state.autoExport.targets.splice(+el.dataset.targetRemove, 1);
+    autoExportChanged();
+  } else if (el.id === 'auto-export-run') {
+    commitFloat();
+    const note = await exportOnSave(true);
+    flash(note.replace(/^ · /, '').replace(/^e/, 'E'), note.includes('failed'));
+  }
+});
 
 const pngSize = () => Math.max(1, Math.min(4096, Math.round(+$<HTMLInputElement>('png-size').value || 64)));
 $('png-size').addEventListener('input', renderPreview);
@@ -1190,7 +1305,7 @@ $('btn-export-svg').addEventListener('click', async () => {
   commitFloat();
   const grouping = $<HTMLSelectElement>('svg-grouping').value as SvgGrouping;
   const svg = exportSvg(state.project, { grouping, width: state.project.size.x * 16, height: state.project.size.y * 16 });
-  const res = await saveBlob(new Blob([svg], { type: 'image/svg+xml' }), `${safeName()}.svg`, '.svg', 'SVG image', 'image/svg+xml');
+  const res = await platform.saveFile(new Blob([svg], { type: 'image/svg+xml' }), `${safeName()}.svg`, SVG);
   if (res) flash(`Exported ${res.name}`);
   renderAll();
 });
@@ -1198,7 +1313,7 @@ $('btn-export-png').addEventListener('click', async () => {
   commitFloat();
   const size = pngSize();
   const blob = await exportPng(state.project, size, size, { crisp: $<HTMLInputElement>('png-crisp').checked });
-  const res = await saveBlob(blob, `${safeName()}.png`, '.png', 'PNG image', 'image/png');
+  const res = await platform.saveFile(blob, `${safeName()}.png`, FORMATS.png);
   if (res) flash(`Exported ${res.name} (${size}×${size})`);
   renderAll();
 });
@@ -1216,6 +1331,13 @@ wrap.addEventListener('drop', (e) => {
   const f = e.dataTransfer?.files[0];
   if (f) openFile(f);
 });
+// the desktop app gets drops from the OS instead, with paths, so Save writes back to the file
+platform.onFileDrop(
+  async ({ ref, file }) => {
+    if (file.name.toLowerCase().endsWith('.svg') || (await discardOk())) openFile(file, ref);
+  },
+  (on) => wrap.classList.toggle('dragging', on),
+);
 
 // ---------- keyboard ----------
 
@@ -1228,7 +1350,7 @@ window.addEventListener('keydown', (e) => {
     if (k === 'z' && !e.shiftKey) undo();
     else if (k === 'y' || (k === 'z' && e.shiftKey)) redo();
     else if (k === 's') save(e.shiftKey);
-    else if (k === 'o') pickOpen('any');
+    else if (k === 'o') discardOk().then((ok) => void (ok && pickOpen('any')));
     else if (k === 'a') selectAll();
     else if (k === 'd') deselect();
     else if (k === 'i' && e.shiftKey) invertSelection();
@@ -1296,8 +1418,9 @@ function flash(msg: string, error = false) {
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (state.dirty) e.preventDefault();
+  if (state.dirty && !platform.isDesktop) e.preventDefault();
 });
+platform.guardClose(discardOk);
 window.addEventListener('resize', () => {
   fitScale();
   renderCanvas();
@@ -1314,3 +1437,4 @@ onSettingsChange((s) => {
 setView(viewMode);
 applySettings();
 renderAll();
+platform.launchFile().then((f) => f && openFile(f.file, f.ref));

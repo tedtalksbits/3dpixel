@@ -7,14 +7,20 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4",
     "@types/three": "^0.170.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
     "three": "^0.170.0"
   }
 }

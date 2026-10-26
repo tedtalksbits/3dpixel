@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="220" fill="#1d2026"/>
+  <!-- extruded sides -->
+  <path d="M232 312h400v80H312v320h-80z" fill="#173D8C" transform="translate(56 56)"/>
+  <path d="M392 552h400l-80 160H392z" fill="#914D35" transform="translate(56 56)"/>
+  <!-- faces -->
+  <path d="M232 312h400v80H312v320h-80z" fill="#2C6DC1"/>
+  <path d="M392 552h400l-80 160H392z" fill="#D47D53"/>
+  <path d="M632 312a160 160 0 0 1 160 160H632z" fill="#FFE051"/>
+</svg>
