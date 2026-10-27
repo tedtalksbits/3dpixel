@@ -334,7 +334,7 @@ Code impact:
 1. **Parts and pivots** (done):
    - Layers, "New part from selection", pivots, a per-part mesh and a GLB node tree.
    - Static export first, so a rigged model imports into an engine with movable parts.
-2. **Clip engine:**
+2. **Clip engine** (done):
    - Tracks, easing, baking, playback in the 3D preview, a play bar, and glTF animation export.
 3. **Object presets:** spin, bob, swing, hinge, pulse and pop. They need one part and no template,
    so **the wheel works here**.

@@ -83,7 +83,22 @@ other browsers download a copy instead.
     OBJ gets one object per part.
   - The `.kenshape` still holds the flattened drawing, so Kenney Shape opens it. The parts are kept
     under an extra key.
-
+- **Animation clips**:
+  - A clip is one animation, like walk or spin, with a length and a loop setting. The play bar
+    under the views plays, scrubs and switches clips. Diamonds mark keys: blue for the selected
+    part, grey for the others.
+  - To animate, pick a part, move the playhead, and change its rotation (degrees), position (tiles)
+    or scale in the Animation panel. Each change becomes a keyframe at that frame, snapped to
+    24 fps.
+  - Each key has an ease for the stretch up to the next key. You can pick linear, step, or the full
+    set from sine through quint, plus expo, circ, back, elastic and bounce, each as in, out or
+    in-out.
+  - Looping clips are seamless without a closing key: after the last key, the pose eases back into
+    the first.
+  - Clips export inside the GLB, sampled at 30 fps plus every key time, so the easing survives.
+    Rotations are kept on a continuous path, so full spins work. Looping clips get a `-loop` suffix,
+    which Godot turns into a looping animation (it removes the suffix from the clip name).
+- **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
     the smallest pixel error for each tile. Colours come from the SVG's own fills, not from blurred
@@ -112,6 +127,8 @@ other browsers download a copy instead.
 | 1–9, 0 | Brush depth 1–10 |
 | R / Shift+R | Rotate the brush shape |
 | ` | Cycle 2D / Split / 3D view |
+| Space | Play / pause the clip |
+| , / . | Step one frame back / forward |
 | Drag / right-drag / scroll in 3D | Orbit / pan / zoom |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl+S / Ctrl+Shift+S | Save / Save as |
@@ -136,6 +153,8 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/platform.ts`: file dialogs, reading and writing, and window integration, for both the browser and the desktop app
 - `src/autoExport.ts`: export-on-save targets
 - `src/rig.ts`: parts, pivots, flattening and the `rig` file key
+- `src/anim.ts`: clips, keyframes, sampling and bake times
+- `src/easing.ts`: easing functions
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

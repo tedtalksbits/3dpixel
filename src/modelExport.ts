@@ -1,8 +1,12 @@
-import { BufferGeometry, Float32BufferAttribute, Group, Mesh, MeshStandardMaterial, Color } from 'three';
+import {
+  BufferGeometry, Float32BufferAttribute, Group, Mesh, MeshStandardMaterial, Color, Object3D, AnimationClip, KeyframeTrack,
+  QuaternionKeyframeTrack, VectorKeyframeTrack, Quaternion, Euler, MathUtils,
+} from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { Project } from './kenshape';
 import { MeshPart, buildModel } from './mesh';
 import { Part, treeOrder } from './rig';
+import { Clip, bakeTimes, sampleTrack, exportName } from './anim';
 
 export type ModelScale = 'tile' | 'fit';
 export type ModelPivot = 'center' | 'bottom';
@@ -38,7 +42,7 @@ const materialName = (p: Project, c: number) => `color${c}_${(p.colors[c] ?? '#F
 function uniqueNames(names: string[]): string[] {
   const used = new Set<string>();
   return names.map((n) => {
-    const base = n.trim().replace(/\s+/g, '_').replace(/[^\w\-.]/g, '') || 'part';
+    const base = n.trim().replace(/\s+/g, '_').replace(/[^\w\-]/g, '') || 'part';
     let name = base;
     for (let i = 2; used.has(name); i++) name = `${base}_${i}`;
     used.add(name);
@@ -72,15 +76,16 @@ function makeMesh(p: Project, m: MeshPart, pos: number[], name: string) {
 }
 
 /**
- * Three.js group with one mesh per palette colour. With more than one rig part, each part is a
- * node positioned at its pivot (relative to its parent's), holding that part's meshes, so the
- * part rotates about its pivot when the node is rotated.
+ * Three.js group with one mesh per palette colour. With more than one rig part (or `nodes`, for
+ * animating a single part), each part is a node positioned at its pivot (relative to its
+ * parent's), holding that part's meshes, so the part rotates about its pivot when the node is
+ * rotated. Each node keeps its rest position in userData.base.
  */
-export function buildGroup(p: Project, opts: ModelExportOptions = {}, rig?: Part[]): Group {
+export function buildGroup(p: Project, opts: ModelExportOptions = {}, rig?: Part[], nodes = false): Group {
   const group = new Group();
   group.name = p.title || 'shape';
 
-  if (!rig || rig.length < 2) {
+  if (!rig || (rig.length < 2 && !nodes)) {
     const meshes = buildModel(rig ? { ...p, tiles: rig[0].tiles } : p);
     const tf = transformFor(p, meshes, opts);
     for (const m of meshes) {
@@ -93,17 +98,18 @@ export function buildGroup(p: Project, opts: ModelExportOptions = {}, rig?: Part
 
   const models = partModels(p, rig);
   const tf = transformFor(p, models.flatMap((o) => o.meshes), opts);
-  const nodes = new Map<string, { node: Group; at: Vec3 }>();
+  const byId = new Map<string, { node: Group; at: Vec3 }>();
   for (const pm of models) {
     const at = tf(...pm.pivot);
     const node = new Group();
     node.name = pm.name;
     node.userData.partId = pm.part.id;
-    const parent = pm.part.parent ? nodes.get(pm.part.parent) : undefined;
+    const parent = pm.part.parent ? byId.get(pm.part.parent) : undefined;
     const origin = parent?.at ?? [0, 0, 0];
     node.position.set(at[0] - origin[0], at[1] - origin[1], at[2] - origin[2]);
+    node.userData.base = node.position.clone();
     (parent?.node ?? group).add(node);
-    nodes.set(pm.part.id, { node, at });
+    byId.set(pm.part.id, { node, at });
     for (const m of pm.meshes) {
       const pos: number[] = [];
       for (let i = 0; i < m.positions.length; i += 3) {
@@ -125,9 +131,50 @@ export function disposeGroup(group: Group) {
   });
 }
 
-export async function exportGlb(p: Project, opts: ModelExportOptions = {}, rig?: Part[]): Promise<Blob> {
-  const group = buildGroup(p, opts, rig);
-  const out = await new GLTFExporter().parseAsync(group, { binary: true });
+/**
+ * Sample a clip into glTF-ready keyframe tracks on the group's part nodes. Rotations become
+ * quaternions (kept on one hemisphere so interpolation takes the short way between samples),
+ * positions are offsets from each node's rest position, and scales avoid exactly 0.
+ */
+export function bakeClip(group: Group, clip: Clip, unit = 1): AnimationClip {
+  const nodes = new Map<string, Object3D>();
+  group.traverse((o) => o.userData.partId && nodes.set(o.userData.partId, o));
+  const times = bakeTimes(clip);
+  const tracks: KeyframeTrack[] = [];
+  const q = new Quaternion();
+  const prev = new Quaternion();
+  const euler = new Euler();
+  for (const tr of clip.tracks) {
+    const node = nodes.get(tr.part);
+    if (!node) continue;
+    const values: number[] = [];
+    times.forEach((t, i) => {
+      const v = sampleTrack(tr, t, clip);
+      if (tr.prop === 'rotation') {
+        q.setFromEuler(euler.set(MathUtils.degToRad(v[0]), MathUtils.degToRad(v[1]), MathUtils.degToRad(v[2])));
+        if (i && q.dot(prev) < 0) q.set(-q.x, -q.y, -q.z, -q.w);
+        prev.copy(q);
+        values.push(q.x, q.y, q.z, q.w);
+      } else if (tr.prop === 'position') {
+        const base = node.userData.base ?? node.position;
+        values.push(base.x + v[0] * unit, base.y + v[1] * unit, base.z + v[2] * unit);
+      } else {
+        values.push(...v.map((n) => (Math.abs(n) < 0.001 ? (n < 0 ? -0.001 : 0.001) : n)));
+      }
+    });
+    const path = tr.prop === 'rotation' ? 'quaternion' : tr.prop === 'position' ? 'position' : 'scale';
+    const Track = tr.prop === 'rotation' ? QuaternionKeyframeTrack : VectorKeyframeTrack;
+    tracks.push(new Track(`${node.name}.${path}`, times, values));
+  }
+  return new AnimationClip(exportName(clip), clip.duration, tracks);
+}
+
+export async function exportGlb(p: Project, opts: ModelExportOptions = {}, rig?: Part[], clips: Clip[] = []): Promise<Blob> {
+  const animated = clips.filter((c) => c.tracks.length);
+  const group = buildGroup(p, opts, rig, animated.length > 0);
+  const unit = opts.scale === 'fit' ? 1 / Math.max(p.size.x, p.size.y) : 1;
+  const animations = animated.map((c) => bakeClip(group, c, unit));
+  const out = await new GLTFExporter().parseAsync(group, { binary: true, animations });
   disposeGroup(group);
   return new Blob([out as ArrayBuffer], { type: 'model/gltf-binary' });
 }

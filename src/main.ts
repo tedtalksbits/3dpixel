@@ -14,6 +14,8 @@ import { FileRef, FileType } from './platform';
 import {
   AutoExport, ExportTarget, TargetFormat, FORMATS, emptyAutoExport, takeAutoExport, withAutoExport, storePath, targetAbsPath, runAutoExport,
 } from './autoExport';
+import { Clip, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, snapTime, keyTimes, keysAt, deleteKeysAt, findTrack } from './anim';
+import { Ease, EASE_OPTIONS } from './easing';
 import { Part, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
 
 type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
@@ -42,6 +44,8 @@ interface Snapshot {
   project: Project;
   parts: Part[];
   active: number;
+  clips: Clip[];
+  clip: number;
   sel: number[];
 }
 
@@ -59,6 +63,11 @@ const state = {
   parts: [basePart(initialProject)] as Part[],
   active: 0,
   dimOthers: true,
+  clips: [] as Clip[],
+  clip: -1, // index of the clip being edited, -1 = none
+  time: 0, // playhead, seconds
+  playing: false,
+  keyEase: 'cubic.inOut' as Ease,
   tool: 'draw' as Tool,
   shape: 0,
   angle: 0,
@@ -86,7 +95,7 @@ const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < state.project
 
 // ---------- history ----------
 
-const snapshot = (): Snapshot => ({ project: cloneProject(state.project), parts: structuredClone(state.parts), active: state.active, sel: [...state.sel] });
+const snapshot = (): Snapshot => ({ project: cloneProject(state.project), parts: structuredClone(state.parts), active: state.active, clips: structuredClone(state.clips), clip: state.clip, sel: [...state.sel] });
 
 function checkpoint() {
   state.undo.push(snapshot());
@@ -100,6 +109,8 @@ function restore(s: Snapshot) {
   state.parts = s.parts;
   state.active = s.active;
   state.project.tiles = s.parts[s.active].tiles;
+  state.clips = s.clips;
+  state.clip = Math.min(s.clip, s.clips.length - 1);
   state.sel = new Set(s.sel);
   state.float = null;
 }
@@ -128,6 +139,10 @@ function setProject(p: Project, file: FileRef | null = null) {
   state.parts = rig.parts;
   state.active = rig.active;
   p.tiles = rig.parts[rig.active].tiles;
+  if (state.playing) stop();
+  state.clips = rig.clips;
+  state.clip = rig.clips.length ? 0 : -1;
+  state.time = 0;
   state.project = p;
   state.undo = [];
   state.redo = [];
@@ -860,6 +875,8 @@ function renderPanels() {
   platform.setWindowTitle(`${name}${state.dirty ? ' •' : ''} — 3dpixel`);
   renderAutoExport();
   renderParts();
+  renderPlaybar();
+  renderPose();
 }
 
 function renderOptions() {
@@ -1153,6 +1170,7 @@ function deletePart() {
   checkpoint();
   const gone = activePart();
   for (const pt of state.parts) if (pt.parent === gone.id) pt.parent = gone.parent;
+  for (const c of state.clips) c.tracks = c.tracks.filter((tr) => tr.part !== gone.id);
   state.parts.splice(state.active, 1);
   selectPart(Math.min(state.active, state.parts.length - 1));
 }
@@ -1266,6 +1284,294 @@ partsPanel.addEventListener('change', (e) => {
   renderAll();
 });
 
+// ---------- animation ----------
+
+const activeClip = (): Clip | null => state.clips[state.clip] ?? null;
+const currentPose = () => {
+  const c = activeClip();
+  return c ? evalClip(c, state.time) : null;
+};
+const keyTime = () => snapTime(state.time);
+const fmtTime = (t: number) => `${t.toFixed(2)} s`;
+const round = (n: number, d = 2) => +n.toFixed(d);
+
+function setTime(t: number) {
+  const c = activeClip();
+  state.time = c ? Math.max(0, Math.min(c.duration, t)) : 0;
+  preview3d.setPose(currentPose());
+  renderPlaybar();
+  renderPose();
+}
+
+let playFrame = 0;
+let lastTick = 0;
+
+function play() {
+  const c = activeClip();
+  if (!c) return;
+  if (viewMode === '2d') setView('split');
+  if (!c.loop && state.time >= c.duration) state.time = 0;
+  state.playing = true;
+  lastTick = performance.now();
+  const tick = (now: number) => {
+    if (!state.playing) return;
+    const clip = activeClip();
+    if (!clip) return stop();
+    state.time += (now - lastTick) / 1000;
+    lastTick = now;
+    if (clip.loop) state.time %= clip.duration;
+    else if (state.time >= clip.duration) {
+      state.time = clip.duration;
+      stop();
+    }
+    preview3d.setPose(currentPose());
+    renderPlaybar();
+    renderPose();
+    if (state.playing) playFrame = requestAnimationFrame(tick);
+  };
+  playFrame = requestAnimationFrame(tick);
+  renderPlaybar();
+}
+
+function stop() {
+  state.playing = false;
+  cancelAnimationFrame(playFrame);
+  // land on a frame, so editing keys there lines up
+  setTime(snapTime(state.time));
+}
+
+const togglePlay = () => (state.playing ? stop() : play());
+
+function stepFrame(d: number) {
+  if (state.playing) stop();
+  setTime(snapTime(state.time + d / FPS));
+}
+
+function addClip() {
+  checkpoint();
+  const n = state.clips.length + 1;
+  let name = n === 1 ? 'idle' : `clip${n}`;
+  for (let i = 2; state.clips.some((c) => c.name === name); i++) name = `clip${n}_${i}`;
+  state.clips.push(newClip(name));
+  state.clip = state.clips.length - 1;
+  state.time = 0;
+  renderAll();
+}
+
+function deleteClip() {
+  if (!activeClip()) return;
+  stop();
+  checkpoint();
+  state.clips.splice(state.clip, 1);
+  state.clip = Math.min(state.clip, state.clips.length - 1);
+  state.time = 0;
+  renderAll();
+}
+
+/** Key one component of the active part's pose at the playhead. */
+function keyValue(prop: Prop, axis: 0 | 1 | 2, value: number) {
+  const c = activeClip();
+  if (!c) return;
+  if (state.playing) stop();
+  checkpoint();
+  setKey(c, activePart().id, prop, keyTime(), axis, value, state.keyEase);
+  preview3d.setPose(currentPose());
+  renderPlaybar();
+  renderPose();
+}
+
+/** Key all three properties of the active part as they are now, so a pose holds from here. */
+function keyWholePose() {
+  const c = activeClip();
+  if (!c) return;
+  checkpoint();
+  const pose = currentPose()?.get(activePart().id);
+  for (const prop of ['rotation', 'position', 'scale'] as Prop[]) {
+    const v = pose?.[prop] ?? REST[prop];
+    for (const axis of [0, 1, 2] as const) setKey(c, activePart().id, prop, keyTime(), axis, v[axis], state.keyEase);
+  }
+  renderAll();
+}
+
+function deleteKeysHere() {
+  const c = activeClip();
+  if (!c) return;
+  checkpoint();
+  deleteKeysAt(c, activePart().id, keyTime());
+  renderAll();
+}
+
+function jumpKey(dir: 1 | -1) {
+  const c = activeClip();
+  if (!c) return;
+  const times = keyTimes(c, activePart().id);
+  const t = keyTime();
+  const next = dir > 0 ? times.find((k) => k > t + 1e-6) : [...times].reverse().find((k) => k < t - 1e-6);
+  if (next !== undefined) setTime(next);
+}
+
+// ticks sit in the track inset by PB_PAD on each side; the head and scrubbing use the same span
+const PB_PAD = 8;
+const headAt = (f: number) => `calc(${PB_PAD}px + (100% - ${PB_PAD * 2}px) * ${f})`;
+
+function renderPlaybar() {
+  const bar = $('playbar');
+  const c = activeClip();
+  if (!bar.dataset.built) {
+    bar.dataset.built = '1';
+    bar.innerHTML = `
+      <button id="pb-play" class="icon" title="Play / pause (Space)"></button>
+      <select id="pb-clip" title="Clip"></select>
+      <div class="pb-track" id="pb-track"><div class="pb-ticks" id="pb-ticks"></div><div class="pb-head" id="pb-head"></div></div>
+      <span class="pb-time mono" id="pb-time"></span>`;
+  }
+  $('pb-play').textContent = state.playing ? '❚❚' : '▶';
+  $<HTMLButtonElement>('pb-play').disabled = !c;
+  const sel = $<HTMLSelectElement>('pb-clip');
+  const opts =
+    (state.clips.length ? '' : `<option value="" disabled>No clips</option>`) +
+    state.clips.map((o, i) => `<option value="${i}"${i === state.clip ? ' selected' : ''}>${escapeHtml(o.name)}${o.loop ? ' ⟳' : ''}</option>`).join('') +
+    `<option value="new">+ New clip</option>`;
+  if (sel.innerHTML !== opts) sel.innerHTML = opts;
+  sel.value = c ? String(state.clip) : '';
+  const track = $('pb-track');
+  track.classList.toggle('disabled', !c);
+  if (!c) {
+    $('pb-ticks').innerHTML = '';
+    $('pb-head').style.left = headAt(0);
+    $('pb-time').textContent = 'No clip';
+    return;
+  }
+  const mine = new Set(keyTimes(c, activePart().id));
+  const ticks = keyTimes(c)
+    .map((t) => `<span class="pb-tick${mine.has(t) ? ' mine' : ''}" style="left:${(t / c.duration) * 100}%" data-t="${t}" title="${fmtTime(t)}"></span>`)
+    .join('');
+  if ($('pb-ticks').innerHTML !== ticks) $('pb-ticks').innerHTML = ticks;
+  $('pb-head').style.left = headAt(state.time / c.duration);
+  $('pb-time').textContent = `${fmtTime(state.time)} / ${fmtTime(c.duration)} · f${Math.round(state.time * FPS)}`;
+}
+
+function poseInputs(prop: Prop, label: string, v: Vec3, keyed: boolean, step: number, title: string) {
+  const axes = ['X', 'Y', 'Z'];
+  return `<div class="pose-row${keyed ? ' keyed' : ''}" title="${title}"><span class="label">${label}</span>${v
+    .map((n, i) => `<label class="pose-axis"><span>${axes[i]}</span><input type="number" step="${step}" data-prop="${prop}" data-axis="${i}" value="${round(n)}" /></label>`)
+    .join('')}</div>`;
+}
+
+function renderPose() {
+  const host = $('anim');
+  if (host.contains(document.activeElement) && document.activeElement?.matches('input:not([type=checkbox])')) return;
+  const c = activeClip();
+  if (!c) {
+    host.innerHTML = `<p class="hint">A clip is one animation, like walk or spin. Pick a part, move the playhead, and change its rotation, position or scale: each change becomes a keyframe. Clips export inside the GLB.</p>
+      <button id="anim-new" class="wide">+ New clip</button>`;
+    return;
+  }
+  const part = activePart();
+  const pose = currentPose()?.get(part.id);
+  const at = keyTime();
+  const keys = keysAt(c, part.id, at);
+  const keyedProp = (prop: Prop) => !!findTrack(c, part.id, prop)?.keys.some((k) => Math.abs(k.t - at) < 1e-6);
+  const shownEase = keys[0]?.ease ?? state.keyEase;
+  host.innerHTML = `
+    <div class="row tight"><input id="clip-name" class="grow" value="${escapeHtml(c.name)}" spellcheck="false" title="Clip name" />
+      <button id="clip-delete" class="icon small" title="Delete this clip">×</button></div>
+    <div class="row">
+      <label class="inline">Length <input id="clip-duration" type="number" min="0.05" step="0.05" value="${round(c.duration, 3)}" /> s</label>
+      <label class="check inline" title="Loops play seamlessly: after the last key the pose eases back into the first"><input id="clip-loop" type="checkbox"${c.loop ? ' checked' : ''} /> Loop</label>
+    </div>
+    <h3>${escapeHtml(part.name)} at ${fmtTime(at)}${keys.length ? ' <span class="badge">key</span>' : ''}</h3>
+    ${poseInputs('rotation', 'Rotate°', pose?.rotation ?? REST.rotation, keyedProp('rotation'), 5, 'Degrees about each axis. Z swings a part in a side view.')}
+    ${poseInputs('position', 'Move', pose?.position ?? REST.position, keyedProp('position'), 0.25, 'Offset in tiles. +Y is up.')}
+    ${poseInputs('scale', 'Scale', pose?.scale ?? REST.scale, keyedProp('scale'), 0.1, '1 is normal size.')}
+    <label>Ease to next key <select id="key-ease">${EASE_OPTIONS.map(([e, l]) => `<option value="${e}"${e === shownEase ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="btn-grid">
+      <button id="key-prev" title="Previous key of this part">◀ Key</button>
+      <button id="key-next" title="Next key of this part">Key ▶</button>
+      <button id="key-pose" title="Key rotation, position and scale as they are now">Key pose</button>
+      <button id="key-delete"${keys.length ? '' : ' disabled'} title="Delete this part's keys at the playhead">Delete key</button>
+    </div>`;
+}
+
+$('playbar').addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('#pb-play')) togglePlay();
+});
+$('playbar').addEventListener('change', (e) => {
+  const sel = e.target as HTMLSelectElement;
+  if (sel.id !== 'pb-clip') return;
+  const value = sel.value; // read first: stopping redraws the bar
+  stop();
+  if (value === 'new') return addClip();
+  state.clip = +value;
+  state.time = 0;
+  renderAll();
+});
+$('playbar').addEventListener('pointerdown', (e) => {
+  const track = (e.target as HTMLElement).closest<HTMLElement>('#pb-track');
+  const c = activeClip();
+  if (!track || !c) return;
+  if (state.playing) stop();
+  const tick = (e.target as HTMLElement).closest<HTMLElement>('.pb-tick');
+  if (tick) return setTime(+tick.dataset.t!);
+  const seek = (ev: PointerEvent) => {
+    const r = track.getBoundingClientRect();
+    setTime(snapTime(((ev.clientX - r.left - PB_PAD) / (r.width - PB_PAD * 2)) * c.duration));
+  };
+  track.setPointerCapture(e.pointerId);
+  seek(e);
+  const move = (ev: PointerEvent) => seek(ev);
+  const up = () => {
+    track.removeEventListener('pointermove', move);
+    track.removeEventListener('pointerup', up);
+  };
+  track.addEventListener('pointermove', move);
+  track.addEventListener('pointerup', up);
+});
+
+const animHost = $('anim');
+animHost.addEventListener('click', (e) => {
+  switch ((e.target as HTMLElement).closest('button')?.id) {
+    case 'anim-new':
+      return addClip();
+    case 'clip-delete':
+      return deleteClip();
+    case 'key-prev':
+      return jumpKey(-1);
+    case 'key-next':
+      return jumpKey(1);
+    case 'key-pose':
+      return keyWholePose();
+    case 'key-delete':
+      return deleteKeysHere();
+  }
+});
+animHost.addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement;
+  const c = activeClip();
+  if (!c) return;
+  if (el.dataset.prop) {
+    el.blur();
+    return keyValue(el.dataset.prop as Prop, +el.dataset.axis! as 0 | 1 | 2, +el.value || 0);
+  }
+  if (el.id === 'key-ease') {
+    state.keyEase = el.value as Ease;
+    const keys = keysAt(c, activePart().id, keyTime());
+    if (keys.length) {
+      checkpoint();
+      for (const k of keys) k.ease = state.keyEase;
+      preview3d.setPose(currentPose());
+    }
+    return;
+  }
+  checkpoint();
+  if (el.id === 'clip-name') c.name = el.value.trim().replace(/\s+/g, '_') || c.name;
+  else if (el.id === 'clip-duration') c.duration = Math.max(1 / FPS, round(+el.value || c.duration, 3));
+  else if (el.id === 'clip-loop') c.loop = el.checked;
+  el.blur();
+  setTime(state.time);
+  renderAll();
+});
+
 // ---------- 3D ----------
 
 type ViewMode = '2d' | 'split' | '3d';
@@ -1293,7 +1599,9 @@ let timer3d = 0;
 function schedule3d() {
   clearTimeout(timer3d);
   timer3d = window.setTimeout(() => {
-    if (viewMode !== '2d') preview3d.update(composite(), liveParts(), state.parts.length > 1 ? activePart().id : undefined);
+    if (viewMode === '2d') return;
+    preview3d.update(composite(), liveParts(), state.parts.length > 1 ? activePart().id : undefined);
+    preview3d.setPose(currentPose());
   }, 30);
 }
 
@@ -1352,7 +1660,7 @@ $('btn-export-model').addEventListener('click', async () => {
   try {
     const opts = modelOpts();
     if ($<HTMLSelectElement>('model-format').value === 'glb') {
-      const res = await platform.saveFile(await exportGlb(state.project, opts, state.parts), `${safeName()}.glb`, FORMATS.glb);
+      const res = await platform.saveFile(await exportGlb(state.project, opts, state.parts, state.clips), `${safeName()}.glb`, FORMATS.glb);
       if (res) flash(`Exported ${res.name}`);
     } else if (platform.isDesktop) {
       const path = await platform.pickSavePath(`${safeName()}.obj`, FORMATS.obj, state.file?.path);
@@ -1396,7 +1704,7 @@ const safeName = () => state.project.title.replace(/[^\w\- ]+/g, '').trim() || '
 async function save(as = false) {
   commitFloat();
   try {
-    const blob = await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active));
+    const blob = await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips));
     const prevPath = state.file?.path;
     const res = await platform.saveFile(blob, `${safeName()}.kenshape`, KENSHAPE, as ? null : state.file);
     if (!res) return;
@@ -1404,7 +1712,7 @@ async function save(as = false) {
     // files when Save as moves the project to another folder
     if (prevPath && res.path && prevPath !== res.path && state.autoExport.targets.length) {
       for (const t of state.autoExport.targets) t.path = storePath(res.path, targetAbsPath(prevPath, t));
-      await platform.writePath(res.path, await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active)));
+      await platform.writePath(res.path, await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips)));
     }
     state.file = res;
     state.dirty = false;
@@ -1421,7 +1729,7 @@ async function exportOnSave(force = false): Promise<string> {
   const cfg = state.autoExport;
   const path = state.file?.path;
   if (!platform.isDesktop || !path || !cfg.targets.length || (!cfg.enabled && !force)) return '';
-  const res = await runAutoExport(state.project, state.parts, path, cfg);
+  const res = await runAutoExport(state.project, state.parts, state.clips, path, cfg);
   if (res.errors.length) return ` · export failed: ${res.errors.join('; ')}`;
   return ` · exported ${res.written.length} file${res.written.length === 1 ? '' : 's'}`;
 }
@@ -1703,6 +2011,11 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
+  if (k === ' ') {
+    e.preventDefault();
+    return togglePlay();
+  }
+  if (k === ',' || k === '.') return stepFrame(k === '.' ? 1 : -1);
   const tool = TOOLS.find((t) => t.key.toLowerCase() === k);
   if (tool) return setTool(tool.id);
   if (k === 'r') return rotate(e.shiftKey ? -1 : 1);

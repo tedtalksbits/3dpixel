@@ -120,3 +120,29 @@ unchanged. As with `autoExport`, Kenney Shape drops the key if it saves the file
 - `visible` only affects the editor. Hidden parts are still exported.
 - In GLB export, each part is a node placed at its pivot, relative to its parent's pivot, with its
   meshes offset so they rotate about it.
+
+### Clips
+
+`rig.clips` holds the animation clips. The rig key is also written for a single-part drawing once
+it has a clip.
+
+```json
+"clips": [{
+  "id": "c1", "name": "walk", "duration": 1, "loop": true,
+  "tracks": [
+    { "part": "p1a2b3", "prop": "rotation", "keys": [
+      { "t": 0, "v": [0, 0, 25], "ease": "sine.inOut" },
+      { "t": 0.5, "v": [0, 0, -25], "ease": "sine.inOut" } ] }
+  ]
+}]
+```
+
+- `prop` is `rotation` (Euler degrees, XYZ order), `position` (an offset in tiles, +Y up) or
+  `scale`.
+- `ease` applies from that key to the next. It's `linear`, `step`, or `<family>.<in|out|inOut>`
+  with sine, quad, cubic, quart, quint, expo, circ, back, elastic or bounce.
+- Before the first key a track holds that key's value. After the last key it also holds, except in
+  a looping clip, where it eases back into the first key at the loop point.
+- On GLB export each clip is sampled at 30 fps plus every key time, and just before a step key's
+  jump. Rotations become quaternions kept on one hemisphere, and scales never reach exactly 0.
+  Looping clips are named with a `-loop` suffix.

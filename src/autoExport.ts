@@ -7,6 +7,7 @@ import { Project } from './kenshape';
 import { exportSvg, exportPng, SvgGrouping } from './svgExport';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
 import { Part, flattenTiles } from './rig';
+import { Clip } from './anim';
 import { FileType, basename, dirname, relativePath, resolvePath, stripExt, writePath } from './platform';
 
 export type TargetFormat = 'glb' | 'obj' | 'png' | 'svg';
@@ -59,12 +60,12 @@ export const storePath = (projectPath: string | undefined, abs: string) =>
 
 export const targetAbsPath = (projectPath: string, t: ExportTarget) => resolvePath(dirname(projectPath), t.path);
 
-async function render(p: Project, rig: Part[], t: ExportTarget, abs: string): Promise<[string, Blob | string][]> {
+async function render(p: Project, rig: Part[], clips: Clip[], t: ExportTarget, abs: string): Promise<[string, Blob | string][]> {
   const flat = { ...p, tiles: flattenTiles(p, rig) };
   const model = { scale: t.scale ?? 'tile', pivot: t.pivot ?? 'center' };
   switch (t.format) {
     case 'glb':
-      return [[abs, await exportGlb(p, model, rig)]];
+      return [[abs, await exportGlb(p, model, rig, clips)]];
     case 'obj': {
       // the .mtl sits beside the .obj and is referenced by file name
       const mtlPath = stripExt(abs) + '.mtl';
@@ -85,12 +86,12 @@ export interface ExportResult {
   errors: string[];
 }
 
-export async function runAutoExport(p: Project, rig: Part[], projectPath: string, cfg: AutoExport): Promise<ExportResult> {
+export async function runAutoExport(p: Project, rig: Part[], clips: Clip[], projectPath: string, cfg: AutoExport): Promise<ExportResult> {
   const res: ExportResult = { written: [], errors: [] };
   for (const t of cfg.targets) {
     const abs = targetAbsPath(projectPath, t);
     try {
-      for (const [path, data] of await render(p, rig, t, abs)) {
+      for (const [path, data] of await render(p, rig, clips, t, abs)) {
         await writePath(path, data);
         res.written.push(path);
       }

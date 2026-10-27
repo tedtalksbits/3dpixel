@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Project } from './kenshape';
 import { buildGroup, disposeGroup } from './modelExport';
 import { Part } from './rig';
+import { Pose } from './anim';
 
 export class Preview3D {
   private renderer: WebGLRenderer;
@@ -78,7 +79,7 @@ export class Preview3D {
       this.scene.remove(this.model);
       disposeGroup(this.model);
     }
-    this.model = buildGroup(p, {}, rig);
+    this.model = buildGroup(p, {}, rig, true);
     this.model.traverse((o) => {
       const part = rig?.find((r) => r.id === o.userData.partId);
       if (!part) return;
@@ -86,6 +87,7 @@ export class Preview3D {
       if (part.id === active) o.add(this.pivotMarker());
     });
     this.scene.add(this.model);
+    this.applyPose();
     // only reframe when the grid size changes, so editing doesn't move the camera
     const sizeKey = `${p.size.x}x${p.size.y}`;
     if (sizeKey !== this.framedSize) {
@@ -102,6 +104,34 @@ export class Preview3D {
     dot.renderOrder = 10;
     dot.userData.editorOnly = true;
     return dot;
+  }
+
+  private pose: Map<string, Pose> | null = null;
+
+  /** Pose parts from an animation (null = rest pose). Kept across rebuilds. */
+  setPose(pose: Map<string, Pose> | null) {
+    this.pose = pose;
+    this.applyPose();
+    this.requestRender();
+  }
+
+  private applyPose() {
+    this.model?.traverse((o) => {
+      const id = o.userData.partId;
+      if (!id) return;
+      const base = o.userData.base;
+      const ps = this.pose?.get(id);
+      if (!ps) {
+        o.position.copy(base);
+        o.rotation.set(0, 0, 0);
+        o.scale.set(1, 1, 1);
+        return;
+      }
+      const d = Math.PI / 180;
+      o.position.set(base.x + ps.position[0], base.y + ps.position[1], base.z + ps.position[2]);
+      o.rotation.set(ps.rotation[0] * d, ps.rotation[1] * d, ps.rotation[2] * d);
+      o.scale.set(...ps.scale);
+    });
   }
 
   private wiggling: { id: string; start: number } | null = null;
@@ -121,8 +151,13 @@ export class Preview3D {
     });
     const t = (performance.now() - w.start) / 1000;
     const done = t > 1.6 || !node;
-    if (node) node.rotation.z = done ? 0 : Math.sin(t * Math.PI * 2.5) * 0.5 * (1 - t / 1.6);
-    if (done) this.wiggling = null;
+    if (done) {
+      this.wiggling = null;
+      this.applyPose();
+    } else if (node) {
+      const restZ = ((this.pose?.get(w.id)?.rotation[2] ?? 0) * Math.PI) / 180;
+      node.rotation.z = restZ + Math.sin(t * Math.PI * 2.5) * 0.5 * (1 - t / 1.6);
+    }
     return !done;
   }
 

@@ -4,6 +4,7 @@
 // parts under the extra key `rig`.
 
 import { Project, Tile, emptyTile } from './kenshape';
+import { Clip, parseClips } from './anim';
 
 export interface Part {
   id: string;
@@ -112,14 +113,15 @@ interface StoredRig {
   version: 1;
   active: number;
   parts: StoredPart[];
+  clips?: Clip[];
 }
 
 /** Take the parts out of a loaded project. Without a rig, the whole drawing is one part. */
-export function takeRig(p: Project): { parts: Part[]; active: number } {
+export function takeRig(p: Project): { parts: Part[]; active: number; clips: Clip[] } {
   const raw = p[RIG_KEY] as StoredRig | undefined;
   delete p[RIG_KEY];
   const count = p.size.x * p.size.y;
-  if (!raw || !Array.isArray(raw.parts) || !raw.parts.length) return { parts: [basePart(p)], active: 0 };
+  if (!raw || !Array.isArray(raw.parts) || !raw.parts.length) return { parts: [basePart(p)], active: 0, clips: [] };
   const parts: Part[] = raw.parts.map((s, i) => {
     const tiles = emptyGrid(p);
     for (const [k, t] of Array.isArray(s.tiles) ? s.tiles : []) if (k >= 0 && k < count) tiles[k] = { ...emptyTile(), ...t };
@@ -137,13 +139,13 @@ export function takeRig(p: Project): { parts: Part[]; active: number } {
     if (part.parent && (!parts.some((o) => o.id === part.parent) || wouldCycle(parts, part.id, part.parent))) part.parent = null;
   }
   const active = Math.max(0, Math.min(parts.length - 1, raw.active | 0));
-  return { parts, active };
+  return { parts, active, clips: parseClips(raw.clips, new Set(parts.map((o) => o.id))) };
 }
 
-/** The project as written to disk: flattened tiles, plus the parts when there's more than one. */
-export function withRig(p: Project, parts: Part[], active: number): Project {
+/** The project as written to disk: flattened tiles, plus the parts and clips when there's anything to rig. */
+export function withRig(p: Project, parts: Part[], active: number, clips: Clip[] = []): Project {
   const out: Project = { ...p, tiles: flattenTiles(p, parts) };
-  if (parts.length < 2) return out;
+  if (parts.length < 2 && !clips.length) return out;
   const rig: StoredRig = {
     version: 1,
     active,
@@ -152,5 +154,6 @@ export function withRig(p: Project, parts: Part[], active: number): Project {
       tiles: tiles.flatMap((t, i) => (t.color >= 0 ? [[i, t] as [number, Tile]] : [])),
     })),
   };
+  if (clips.length) rig.clips = clips;
   return { ...out, [RIG_KEY]: rig };
 }

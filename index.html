@@ -85,6 +85,7 @@
         </section>
       </aside>
 
+      <div class="center">
       <section class="workspace view-split" id="workspace">
         <div class="canvas-wrap" id="canvas-wrap">
           <div id="canvas" class="canvas"></div>
@@ -96,6 +97,8 @@
           <span class="overlay-hint">Drag to orbit · right-drag to pan · scroll to zoom</span>
         </div>
       </section>
+      <div class="playbar" id="playbar"></div>
+      </div>
 
       <aside class="panel right">
         <section id="parts-panel">
@@ -108,6 +111,10 @@
             <button id="part-delete" title="Delete this part and its tiles">Delete</button>
           </div>
           <div id="part-props" class="part-props"></div>
+        </section>
+        <section id="anim-panel">
+          <h2>Animation <span class="hint">Space plays · , . step</span></h2>
+          <div id="anim"></div>
         </section>
         <section id="selection-panel" class="selection-panel hidden">
           <h2>Selection <span id="sel-count" class="hint"></span></h2>

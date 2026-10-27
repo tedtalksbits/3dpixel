@@ -260,3 +260,30 @@ button.icon.small { padding: 1px 6px; font-size: 13px; }
 .canvas .pivot-dot { fill: #fff; stroke: #ff3b6b; stroke-width: 2; }
 .canvas .pivot-active circle { fill: rgba(255, 59, 107, 0.15); stroke: #ff3b6b; stroke-width: 2.5; }
 .canvas .pivot-active path { stroke: #ff3b6b; stroke-width: 2; }
+
+/* play bar and animation panel */
+.center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.center .workspace { flex: 1; }
+.playbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line); }
+.playbar #pb-play { width: 34px; font-size: 12px; }
+.playbar select { max-width: 160px; }
+.pb-track { position: relative; flex: 1; height: 26px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; cursor: pointer; touch-action: none; }
+.pb-track.disabled { opacity: 0.4; pointer-events: none; }
+.pb-ticks { position: absolute; inset: 0 8px; }
+.pb-head { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: #ff3b6b; pointer-events: none; }
+.pb-head::before { content: ''; position: absolute; top: 0; left: -4px; border: 5px solid transparent; border-top-color: #ff3b6b; }
+.pb-tick { position: absolute; top: 8px; width: 8px; height: 8px; margin-left: -4px; background: var(--muted); transform: rotate(45deg); opacity: 0.5; }
+.pb-tick.mine { background: var(--accent); opacity: 1; }
+.pb-time { min-width: 150px; text-align: right; color: var(--muted); font-size: 12px; }
+#anim h3 { font-size: 12px; font-weight: 600; margin: 12px 0 2px; display: flex; gap: 6px; align-items: center; }
+#anim .grow { flex: 1; min-width: 0; }
+#anim input:not([type]) { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit; }
+#anim label.inline { flex-direction: row; align-items: center; gap: 6px; margin: 0; }
+#anim label.inline input[type='number'] { width: 64px; }
+.pose-row { display: flex; align-items: center; gap: 4px; margin-top: 6px; padding: 2px 4px; border-radius: 5px; }
+.pose-row.keyed { background: color-mix(in srgb, #ffb020 16%, transparent); }
+.pose-row .label { min-width: 46px; font-size: 11px; }
+#anim .row button.icon { flex: 0 0 auto; }
+.panel .pose-axis { flex-direction: row; align-items: center; gap: 1px; margin: 0; flex: 1; min-width: 0; font-size: 9px; }
+.panel .pose-axis input { width: 100%; min-width: 0; padding: 3px 2px; font-size: 12px; text-align: right; -moz-appearance: textfield; }
+.panel .pose-axis input::-webkit-inner-spin-button { display: none; }
