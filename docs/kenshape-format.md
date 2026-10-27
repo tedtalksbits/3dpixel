@@ -146,3 +146,14 @@ it has a clip.
 - On GLB export each clip is sampled at 30 fps plus every key time, and just before a step key's
   jump. Rotations become quaternions kept on one hemisphere, and scales never reach exactly 0.
   Looping clips are named with a `-loop` suffix.
+
+A clip can also list live presets. Their generated tracks carry `"preset": "<use id>"`, and
+3dpixel rebuilds those tracks from the parameters whenever a slider or the clip length changes.
+Other tools can ignore `presets` and just play the tracks.
+
+```json
+"presets": [{ "id": "c3", "preset": "spin", "part": "body", "params": { "axis": "z", "turns": 2, "direction": "cw", "ease": "linear" } }]
+```
+
+`preset` is one of `spin`, `bob`, `swing`, `hinge`, `pulse` or `pop`. The parameters are listed in
+`src/presets.ts`.

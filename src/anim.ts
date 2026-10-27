@@ -2,6 +2,7 @@
 // degrees (readable, and spins can pass 360°) and baked into glTF keyframes on export.
 
 import { Ease, ease, isEase } from './easing';
+import type { PresetUse } from './presets';
 
 export type Prop = 'rotation' | 'position' | 'scale';
 export type Vec3 = [number, number, number];
@@ -17,6 +18,8 @@ export interface Track {
   part: string; // Part.id
   prop: Prop;
   keys: Key[]; // sorted by t
+  /** Id of the PresetUse that generates this track; it's rebuilt when the preset changes. */
+  preset?: string;
 }
 
 export interface Clip {
@@ -25,6 +28,8 @@ export interface Clip {
   duration: number; // seconds
   loop: boolean;
   tracks: Track[];
+  /** Live presets; see presets.ts. */
+  presets?: PresetUse[];
 }
 
 export interface Pose {
@@ -145,8 +150,9 @@ export function parseClips(raw: unknown, partIds: Set<string>): Clip[] {
         .filter((k: any) => Number.isFinite(+k?.t))
         .map((k: any) => ({ t: +k.t, v: vec(k.v, REST[tr.prop as Prop]), ease: isEase(k.ease) ? k.ease : 'cubic.inOut' }))
         .sort((a: Key, b: Key) => a.t - b.t);
-      if (keys.length) clip.tracks.push({ part: tr.part, prop: tr.prop, keys });
+      if (keys.length) clip.tracks.push({ part: tr.part, prop: tr.prop, keys, ...(typeof tr.preset === 'string' ? { preset: tr.preset } : {}) });
     }
+    if (Array.isArray(c.presets)) clip.presets = c.presets; // checked by cleanPresets in presets.ts
     return [clip];
   });
 }

@@ -5,6 +5,7 @@
 
 import { Project, Tile, emptyTile } from './kenshape';
 import { Clip, parseClips } from './anim';
+import { cleanPresets } from './presets';
 
 export interface Part {
   id: string;
@@ -139,7 +140,10 @@ export function takeRig(p: Project): { parts: Part[]; active: number; clips: Cli
     if (part.parent && (!parts.some((o) => o.id === part.parent) || wouldCycle(parts, part.id, part.parent))) part.parent = null;
   }
   const active = Math.max(0, Math.min(parts.length - 1, raw.active | 0));
-  return { parts, active, clips: parseClips(raw.clips, new Set(parts.map((o) => o.id))) };
+  const ids = new Set(parts.map((o) => o.id));
+  const clips = parseClips(raw.clips, ids);
+  for (const c of clips) cleanPresets(c, ids);
+  return { parts, active, clips };
 }
 
 /** The project as written to disk: flattened tiles, plus the parts and clips when there's anything to rig. */

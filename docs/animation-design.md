@@ -336,7 +336,7 @@ Code impact:
    - Static export first, so a rigged model imports into an engine with movable parts.
 2. **Clip engine** (done):
    - Tracks, easing, baking, playback in the 3D preview, a play bar, and glTF animation export.
-3. **Object presets:** spin, bob, swing, hinge, pulse and pop. They need one part and no template,
+3. **Object presets** (done): spin, bob, swing, hinge, pulse and pop. They need one part and no template,
    so **the wheel works here**.
 4. **Templates and creature presets:**
    - Role checklist, auto-split and auto-pivots.

@@ -287,3 +287,21 @@ button.icon.small { padding: 1px 6px; font-size: 13px; }
 .panel .pose-axis { flex-direction: row; align-items: center; gap: 1px; margin: 0; flex: 1; min-width: 0; font-size: 9px; }
 .panel .pose-axis input { width: 100%; min-width: 0; padding: 3px 2px; font-size: 12px; text-align: right; -moz-appearance: textfield; }
 .panel .pose-axis input::-webkit-inner-spin-button { display: none; }
+
+/* presets */
+.preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 6px; }
+.preset-grid button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; font-size: 11px; }
+.preset-icon { font-size: 15px; line-height: 1; }
+.preset-card { margin-top: 8px; padding: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+.preset-head { display: flex; align-items: center; gap: 6px; }
+.preset-head .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-card button.small, .pivot-row button.small { padding: 2px 7px; font-size: 11px; }
+.preset-card label { margin-top: 6px; }
+.preset-card select { background: var(--panel); }
+.preset-card label.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; }
+.preset-card label.slider input { grid-column: 1 / -1; accent-color: var(--accent); }
+.preset-card label.slider .mono { color: var(--text); font-size: 11px; }
+.pivot-row { display: flex; align-items: center; gap: 3px; margin-top: 8px; }
+.pivot-row .label { min-width: 0; margin-right: auto; font-size: 11px; }
+.pivot-row button.suggested { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.pivot-row button.active { background: var(--accent); border-color: var(--accent); color: #fff; }

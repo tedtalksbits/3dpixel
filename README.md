@@ -98,6 +98,21 @@ other browsers download a copy instead.
   - Clips export inside the GLB, sampled at 30 fps plus every key time, so the easing survives.
     Rotations are kept on a continuous path, so full spins work. Looping clips get a `-loop` suffix,
     which Godot turns into a looping animation (it removes the suffix from the clip name).
+- **Animation presets**: one click animates the selected part, starts playing, and gives you
+  sliders that update live:
+  - **Spin** (wheels, coins, fans): axis, turns per loop, direction, steady or wind-up.
+  - **Bob** (floating pickups, boats): height, bobs per loop, float or bouncy.
+  - **Swing** (signs, lanterns, tails): angle, swings per loop, axis.
+  - **Hinge** (doors, lids, chests): angle; open, hold and close, or open once, or close once;
+    smooth, snappy or slam.
+  - **Pulse** (hearts, power-ups): size, pulses per loop, even or stretched with the volume kept.
+  - **Pop** (spawning): in or out, with overshoot, springy or smooth.
+  - Presets on different properties stack. Spin plus Bob makes a floating, spinning pickup.
+  - Counts are whole numbers per clip, so every loop is seamless. Changing the clip length
+    stretches the presets to fit.
+  - Each preset card has pivot buttons (centre or an edge), with the usual spot for that motion
+    highlighted.
+  - **Customise**, or editing a preset's values by hand, turns the preset into plain keys.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -155,6 +170,7 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/rig.ts`: parts, pivots, flattening and the `rig` file key
 - `src/anim.ts`: clips, keyframes, sampling and bake times
 - `src/easing.ts`: easing functions
+- `src/presets.ts`: animation presets that generate keyframe tracks
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

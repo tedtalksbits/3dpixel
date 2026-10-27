@@ -16,6 +16,7 @@ import {
 } from './autoExport';
 import { Clip, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, snapTime, keyTimes, keysAt, deleteKeysAt, findTrack } from './anim';
 import { Ease, EASE_OPTIONS } from './easing';
+import { PRESETS, PRESET_LIST, PresetId, PresetUse, PivotSpot, addPreset, applyPreset, removePreset, customisePreset, refreshPresets } from './presets';
 import { Part, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
 
 type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
@@ -1170,7 +1171,10 @@ function deletePart() {
   checkpoint();
   const gone = activePart();
   for (const pt of state.parts) if (pt.parent === gone.id) pt.parent = gone.parent;
-  for (const c of state.clips) c.tracks = c.tracks.filter((tr) => tr.part !== gone.id);
+  for (const c of state.clips) {
+    c.tracks = c.tracks.filter((tr) => tr.part !== gone.id);
+    c.presets = c.presets?.filter((u) => u.part !== gone.id);
+  }
   state.parts.splice(state.active, 1);
   selectPart(Math.min(state.active, state.parts.length - 1));
 }
@@ -1326,7 +1330,7 @@ function play() {
     }
     preview3d.setPose(currentPose());
     renderPlaybar();
-    renderPose();
+    refreshPoseFields();
     if (state.playing) playFrame = requestAnimationFrame(tick);
   };
   playFrame = requestAnimationFrame(tick);
@@ -1374,6 +1378,7 @@ function keyValue(prop: Prop, axis: 0 | 1 | 2, value: number) {
   if (!c) return;
   if (state.playing) stop();
   checkpoint();
+  releasePresets(c, activePart().id, [prop]);
   setKey(c, activePart().id, prop, keyTime(), axis, value, state.keyEase);
   preview3d.setPose(currentPose());
   renderPlaybar();
@@ -1385,6 +1390,7 @@ function keyWholePose() {
   const c = activeClip();
   if (!c) return;
   checkpoint();
+  releasePresets(c, activePart().id);
   const pose = currentPose()?.get(activePart().id);
   for (const prop of ['rotation', 'position', 'scale'] as Prop[]) {
     const v = pose?.[prop] ?? REST[prop];
@@ -1397,6 +1403,7 @@ function deleteKeysHere() {
   const c = activeClip();
   if (!c) return;
   checkpoint();
+  releasePresets(c, activePart().id);
   deleteKeysAt(c, activePart().id, keyTime());
   renderAll();
 }
@@ -1451,6 +1458,114 @@ function renderPlaybar() {
   $('pb-time').textContent = `${fmtTime(state.time)} / ${fmtTime(c.duration)} · f${Math.round(state.time * FPS)}`;
 }
 
+/** Hand-editing a preset's keys turns that preset into plain keys first. */
+function releasePresets(c: Clip, part: string, props?: Prop[]) {
+  const ids = new Set(c.tracks.filter((tr) => tr.part === part && tr.preset && (!props || props.includes(tr.prop))).map((tr) => tr.preset!));
+  for (const id of ids) {
+    const use = c.presets?.find((u) => u.id === id);
+    customisePreset(c, id);
+    if (use) flash(`${PRESETS[use.preset].name} is now plain keys, so you can edit them.`);
+  }
+}
+
+/** Where a pivot spot falls on a part: the middle or an edge of its tiles. */
+function pivotSpot(pt: Part, spot: PivotSpot): [number, number] {
+  const { x: w, y: h } = state.project.size;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let x = 0; x < w; x++)
+    for (let y = 0; y < h; y++)
+      if (pt.tiles[x * h + y].color >= 0) (minX = Math.min(minX, x)), (minY = Math.min(minY, y)), (maxX = Math.max(maxX, x + 1)), (maxY = Math.max(maxY, y + 1));
+  if (minX === Infinity) return [w / 2, h / 2];
+  const snap = (v: number) => Math.round(v * 2) / 2;
+  const cx = snap((minX + maxX) / 2);
+  const cy = snap((minY + maxY) / 2);
+  return { centre: [cx, cy], top: [cx, minY], bottom: [cx, maxY], left: [minX, cy], right: [maxX, cy] }[spot] as [number, number];
+}
+
+function uniqueClipName(base: string) {
+  let name = base;
+  for (let i = 2; state.clips.some((c) => c.name === name); i++) name = `${base}${i}`;
+  return name;
+}
+
+/** Add a preset to the active part, in the current clip or a new one, and play it. */
+function addPresetToClip(id: PresetId) {
+  const def = PRESETS[id];
+  stop();
+  checkpoint();
+  let c = activeClip();
+  if (!c) {
+    state.clips.push((c = newClip(uniqueClipName(id))));
+    state.clip = state.clips.length - 1;
+  }
+  const fresh = !c.tracks.length;
+  if (fresh) {
+    c.duration = def.length;
+    // an untouched default name takes the preset's name
+    if (/^(idle|clip\d+(_\d+)?)$/.test(c.name)) c.name = uniqueClipName(id);
+  }
+  const part = activePart();
+  const use = addPreset(c, id, part.id);
+  if (fresh || c.presets!.length === 1) c.loop = def.loops(use.params);
+  state.time = 0;
+  renderAll();
+  play();
+  const at = pivotSpot(part, def.pivot);
+  const off = part.pivot[0] !== at[0] || part.pivot[1] !== at[1];
+  flash(`${def.name} added to ${part.name}.${off ? ` Its pivot usually goes at the ${def.pivotHint}: use the pivot buttons on the card.` : ''}`);
+}
+
+function presetCard(c: Clip, use: PresetUse) {
+  const def = PRESETS[use.preset];
+  const pt = partById(use.part);
+  const spots: [PivotSpot, string, string][] = [
+    ['centre', '·', 'Centre'],
+    ['top', '↑', 'Top edge'],
+    ['bottom', '↓', 'Bottom edge'],
+    ['left', '←', 'Left edge'],
+    ['right', '→', 'Right edge'],
+  ];
+  const at = (spot: PivotSpot) => (pt ? pivotSpot(pt, spot) : [0, 0]);
+  const here = (spot: PivotSpot) => pt && at(spot)[0] === pt.pivot[0] && at(spot)[1] === pt.pivot[1];
+  const params = def.params
+    .map((p) => {
+      const v = use.params[p.key];
+      if (p.kind === 'select')
+        return `<label>${p.label} <select data-use="${use.id}" data-param="${p.key}">${p.options!
+          .map(([o, l]) => `<option value="${o}"${o === v ? ' selected' : ''}>${l}</option>`)
+          .join('')}</select></label>`;
+      return `<label class="slider">${p.label} <span class="mono" data-val="${use.id}-${p.key}">${v}${p.unit ?? ''}</span>
+        <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${v}" data-use="${use.id}" data-param="${p.key}" /></label>`;
+    })
+    .join('');
+  return `<div class="preset-card">
+    <div class="preset-head"><span class="preset-icon">${def.icon}</span><b>${def.name}</b><span class="hint">${escapeHtml(pt?.name ?? '?')}</span>
+      <button class="small" data-use-custom="${use.id}" title="Turn into plain keys you can edit by hand">Customise</button>
+      <button class="icon small" data-use-remove="${use.id}" title="Remove this preset and its keys">×</button></div>
+    ${params}
+    <div class="pivot-row" title="Pivot: the point the part ${use.preset === 'bob' ? 'moves with' : 'turns or grows around'}. Usually the ${def.pivotHint}.">
+      <span class="label">Pivot</span>${spots
+        .map(([s, icon, label]) => `<button class="small${s === def.pivot ? ' suggested' : ''}${here(s) ? ' active' : ''}" data-use-pivot="${use.id}" data-spot="${s}" title="${label}${s === def.pivot ? ' (suggested)' : ''}">${icon}</button>`)
+        .join('')}
+    </div>
+  </div>`;
+}
+
+const presetButtons = () =>
+  `<div class="preset-grid">${PRESET_LIST.map((d) => `<button data-preset-add="${d.id}" title="${escapeHtml(d.help)}"><span class="preset-icon">${d.icon}</span>${d.name}</button>`).join('')}</div>`;
+
+/** While playing, update only the numbers: rebuilding the panel every frame would swallow clicks. */
+function refreshPoseFields() {
+  const host = $('anim');
+  const pose = currentPose()?.get(activePart().id);
+  host.querySelectorAll<HTMLInputElement>('input[data-prop]').forEach((i) => {
+    if (i === document.activeElement) return;
+    i.value = String(round((pose?.[i.dataset.prop as Prop] ?? REST[i.dataset.prop as Prop])[+i.dataset.axis!]));
+  });
+  const title = host.querySelector('#pose-title');
+  if (title) title.textContent = `${activePart().name} at ${fmtTime(keyTime())}`;
+}
+
 function poseInputs(prop: Prop, label: string, v: Vec3, keyed: boolean, step: number, title: string) {
   const axes = ['X', 'Y', 'Z'];
   return `<div class="pose-row${keyed ? ' keyed' : ''}" title="${title}"><span class="label">${label}</span>${v
@@ -1463,8 +1578,9 @@ function renderPose() {
   if (host.contains(document.activeElement) && document.activeElement?.matches('input:not([type=checkbox])')) return;
   const c = activeClip();
   if (!c) {
-    host.innerHTML = `<p class="hint">A clip is one animation, like walk or spin. Pick a part, move the playhead, and change its rotation, position or scale: each change becomes a keyframe. Clips export inside the GLB.</p>
-      <button id="anim-new" class="wide">+ New clip</button>`;
+    host.innerHTML = `<p class="hint">A clip is one animation, like walk or spin. Start from a preset for ${escapeHtml(activePart().name)}, or make an empty clip and key poses yourself. Clips export inside the GLB.</p>
+      ${presetButtons()}
+      <button id="anim-new" class="wide">+ Empty clip</button>`;
     return;
   }
   const part = activePart();
@@ -1480,7 +1596,10 @@ function renderPose() {
       <label class="inline">Length <input id="clip-duration" type="number" min="0.05" step="0.05" value="${round(c.duration, 3)}" /> s</label>
       <label class="check inline" title="Loops play seamlessly: after the last key the pose eases back into the first"><input id="clip-loop" type="checkbox"${c.loop ? ' checked' : ''} /> Loop</label>
     </div>
-    <h3>${escapeHtml(part.name)} at ${fmtTime(at)}${keys.length ? ' <span class="badge">key</span>' : ''}</h3>
+    <h3>Presets for ${escapeHtml(part.name)}</h3>
+    ${presetButtons()}
+    ${(c.presets ?? []).map((u) => presetCard(c, u)).join('')}
+    <h3><span id="pose-title">${escapeHtml(part.name)} at ${fmtTime(at)}</span>${keys.length ? ' <span class="badge">key</span>' : ''}</h3>
     ${poseInputs('rotation', 'Rotate°', pose?.rotation ?? REST.rotation, keyedProp('rotation'), 5, 'Degrees about each axis. Z swings a part in a side view.')}
     ${poseInputs('position', 'Move', pose?.position ?? REST.position, keyedProp('position'), 0.25, 'Offset in tiles. +Y is up.')}
     ${poseInputs('scale', 'Scale', pose?.scale ?? REST.scale, keyedProp('scale'), 0.1, '1 is normal size.')}
@@ -1530,7 +1649,29 @@ $('playbar').addEventListener('pointerdown', (e) => {
 
 const animHost = $('anim');
 animHost.addEventListener('click', (e) => {
-  switch ((e.target as HTMLElement).closest('button')?.id) {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('button');
+  const c = activeClip();
+  if (b?.dataset.presetAdd) return addPresetToClip(b.dataset.presetAdd as PresetId);
+  if (c && b?.dataset.useCustom) {
+    checkpoint();
+    customisePreset(c, b.dataset.useCustom);
+    flash('The preset is now plain keys. Edit them in the pose fields below.');
+    return renderAll();
+  }
+  if (c && b?.dataset.useRemove) {
+    checkpoint();
+    removePreset(c, b.dataset.useRemove);
+    setTime(state.time);
+    return renderAll();
+  }
+  if (c && b?.dataset.usePivot) {
+    const pt = partById(c.presets?.find((u) => u.id === b.dataset.usePivot)?.part ?? null);
+    if (!pt) return;
+    checkpoint();
+    pt.pivot = pivotSpot(pt, b.dataset.spot as PivotSpot);
+    return renderAll();
+  }
+  switch (b?.id) {
     case 'anim-new':
       return addClip();
     case 'clip-delete':
@@ -1545,10 +1686,39 @@ animHost.addEventListener('click', (e) => {
       return deleteKeysHere();
   }
 });
+/** Slider drags make one undo step: checkpoint on the first input, reset on change. */
+let presetDrag = false;
+function setPresetParam(el: HTMLInputElement | HTMLSelectElement, live: boolean) {
+  const c = activeClip();
+  const use = c?.presets?.find((u) => u.id === el.dataset.use);
+  if (!c || !use) return;
+  if (!presetDrag) checkpoint();
+  presetDrag = live;
+  const def = PRESETS[use.preset];
+  const p = def.params.find((o) => o.key === el.dataset.param)!;
+  use.params[p.key] = p.kind === 'range' ? +el.value : el.value;
+  applyPreset(c, use);
+  if (c.presets!.length === 1) c.loop = def.loops(use.params);
+  const label = animHost.querySelector(`[data-val="${use.id}-${p.key}"]`);
+  if (label) label.textContent = `${use.params[p.key]}${p.unit ?? ''}`;
+  if (!state.playing) play();
+  preview3d.setPose(currentPose());
+  renderPlaybar();
+}
+animHost.addEventListener('input', (e) => {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset.use && el.type === 'range') setPresetParam(el, true);
+});
+
 animHost.addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement;
   const c = activeClip();
   if (!c) return;
+  if (el.dataset.use) {
+    setPresetParam(el, false);
+    el.blur();
+    return renderAll();
+  }
   if (el.dataset.prop) {
     el.blur();
     return keyValue(el.dataset.prop as Prop, +el.dataset.axis! as 0 | 1 | 2, +el.value || 0);
@@ -1558,6 +1728,7 @@ animHost.addEventListener('change', (e) => {
     const keys = keysAt(c, activePart().id, keyTime());
     if (keys.length) {
       checkpoint();
+      releasePresets(c, activePart().id);
       for (const k of keys) k.ease = state.keyEase;
       preview3d.setPose(currentPose());
     }
@@ -1565,7 +1736,10 @@ animHost.addEventListener('change', (e) => {
   }
   checkpoint();
   if (el.id === 'clip-name') c.name = el.value.trim().replace(/\s+/g, '_') || c.name;
-  else if (el.id === 'clip-duration') c.duration = Math.max(1 / FPS, round(+el.value || c.duration, 3));
+  else if (el.id === 'clip-duration') {
+    c.duration = Math.max(1 / FPS, round(+el.value || c.duration, 3));
+    refreshPresets(c); // presets stretch to the new length
+  }
   else if (el.id === 'clip-loop') c.loop = el.checked;
   el.blur();
   setTime(state.time);
