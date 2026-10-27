@@ -2,12 +2,12 @@
 // use 255 colours or fewer (the flat front view usually does) the palette is exact; otherwise it is
 // built by median cut. Index 255 is transparent, for pixels under half opacity.
 
-type RGB = [number, number, number];
+export type RGB = [number, number, number];
 
 const TRANSPARENT = 255;
 
 /** Median cut over a colour histogram, down to `max` colours. */
-function medianCut(hist: Map<number, number>, max: number): RGB[] {
+export function medianCut(hist: Map<number, number>, max: number): RGB[] {
   type BoxT = { cols: [RGB, number][] };
   const boxes: BoxT[] = [{ cols: [...hist].map(([k, n]) => [[(k >> 16) & 255, (k >> 8) & 255, k & 255], n]) }];
   const range = (b: BoxT, ch: number) => {

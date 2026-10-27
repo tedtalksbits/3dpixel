@@ -3,6 +3,7 @@ import { Project, Tile, newProject, getTile, readKenshape, writeKenshape, cloneP
 import { SHAPES } from './shapes';
 import { TILE, exportSvg, exportPng, tilePath, SvgGrouping } from './svgExport';
 import { importSvg, PaletteMode } from './svgImport';
+import { importPng, PngDepth } from './pngImport';
 import { Preview3D } from './preview3d';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
 import { tileDepths } from './mesh';
@@ -2366,6 +2367,7 @@ function renderAll() {
 
 const KENSHAPE: FileType = { description: 'Kenney Shape project', ext: 'kenshape', mime: 'application/octet-stream' };
 const SVG: FileType = { description: 'SVG image', ext: 'svg', mime: 'image/svg+xml' };
+const IMAGE: FileType = { description: 'PNG image', ext: 'png', mime: 'image/png' };
 
 const safeName = () => state.project.title.replace(/[^\w\- ]+/g, '').trim() || 'shape';
 
@@ -2406,6 +2408,8 @@ async function openFile(file: File, ref: FileRef | null = null) {
   try {
     if (file.name.toLowerCase().endsWith('.svg')) {
       await doImportSvg(await file.text(), file.name);
+    } else if (isImage(file.name)) {
+      await doImportPng(file, file.name);
     } else {
       setProject(await readKenshape(await file.arrayBuffer()), ref ?? { name: file.name });
       flash(`Opened ${file.name}`);
@@ -2425,19 +2429,42 @@ async function doImportSvg(text: string, name: string) {
     palette: state.project.colors,
   });
   res.project.title = name.replace(/\.svg$/i, '');
+  showImported(res.project, res.notes);
+}
+
+const isImage = (name: string) => /\.(png|gif|webp|bmp)$/i.test(name);
+
+async function doImportPng(blob: Blob, name: string) {
+  const colors = $<HTMLSelectElement>('png-colors').value;
+  const size = $<HTMLSelectElement>('png-size').value;
+  const res = await importPng(blob, {
+    size: size === 'pixel' ? 'pixel' : +size,
+    trim: $<HTMLInputElement>('png-trim').checked,
+    paletteMode: colors === 'project' ? 'project' : 'image',
+    palette: state.project.colors,
+    maxColors: colors === 'project' ? PALETTE_MAX : +colors,
+    depth: $<HTMLSelectElement>('png-depth').value as PngDepth,
+    thickness: $<HTMLInputElement>('png-thickness').value.trim() ? clampDepth(+$<HTMLInputElement>('png-thickness').value || 1) : 'auto',
+  });
+  res.project.title = name.replace(/\.[^.]+$/, '');
+  showImported(res.project, res.notes);
+}
+
+/** Replace the project with an imported one, keeping the old one a step back in undo. */
+function showImported(p: Project, notes: string[]) {
   commitFloat();
   const prev = snapshot();
-  setProject(res.project);
+  setProject(p);
   state.undo = [prev];
   state.dirty = true;
   renderAll();
-  flash(res.notes.join(' '));
+  flash(notes.join(' '));
 }
 
-async function pickOpen(accept: 'any' | 'svg') {
+async function pickOpen(accept: 'any' | 'svg' | 'png') {
   if (platform.canPickFile) {
     try {
-      const picked = await platform.pickFile(accept === 'svg' ? [SVG] : [KENSHAPE, SVG]);
+      const picked = await platform.pickFile(accept === 'svg' ? [SVG] : accept === 'png' ? [IMAGE] : [KENSHAPE, SVG, IMAGE]);
       if (picked) await openFile(picked.file, picked.ref);
     } catch (err: any) {
       flash(String(err?.message ?? err), true);
@@ -2445,7 +2472,7 @@ async function pickOpen(accept: 'any' | 'svg') {
     return;
   }
   const input = $<HTMLInputElement>('file-input');
-  input.accept = accept === 'svg' ? '.svg' : '.kenshape,.svg';
+  input.accept = accept === 'svg' ? '.svg' : accept === 'png' ? '.png,.gif,.webp,.bmp' : '.kenshape,.svg,.png,.gif,.webp,.bmp';
   input.click();
 }
 
@@ -2473,6 +2500,7 @@ $('btn-save-as').addEventListener('click', () => save(true));
 $('btn-undo').addEventListener('click', undo);
 $('btn-redo').addEventListener('click', redo);
 $('btn-import-svg').addEventListener('click', () => pickOpen('svg'));
+$('btn-import-png').addEventListener('click', () => pickOpen('png'));
 
 // ---------- export on save ----------
 
@@ -2627,7 +2655,7 @@ wrap.addEventListener('drop', (e) => {
 // the desktop app gets drops from the OS instead, with paths, so Save writes back to the file
 platform.onFileDrop(
   async ({ ref, file }) => {
-    if (file.name.toLowerCase().endsWith('.svg') || (await discardOk())) openFile(file, ref);
+    if (file.name.toLowerCase().endsWith('.svg') || isImage(file.name) || (await discardOk())) openFile(file, ref);
   },
   (on) => wrap.classList.toggle('dragging', on),
 );

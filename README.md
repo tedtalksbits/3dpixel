@@ -202,6 +202,17 @@ other browsers download a copy instead.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
     the smallest pixel error for each tile. Colours come from the SVG's own fills, not from blurred
     pixels.
+- **Turn pixel art into a 3D model with PNG import:**
+  - Each pixel becomes a square tile. Pixels under half opacity are left empty, and transparent
+    margins are trimmed.
+  - Sprites that were shared scaled up (each pixel drawn as a 4×4 block, say) are detected and
+    sampled back down to their real pixels.
+  - Colours are kept exactly, up to 64. You can also reduce them to 32 or 16 by median cut, or
+    snap them to the current palette.
+  - Rounded depth makes the middle of the shape thicker than its outline. By default the thickest
+    part is about as deep as the body is wide, so a character reads as a solid figure rather than a
+    cut-out. Flat depth gives every tile the same depth.
+  - Use the PNG import panel, Open, or drag an image onto the window. GIF, WebP and BMP work too.
 
 ## Controls
 
@@ -244,6 +255,7 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/shapes.ts`: shape table (SVG path per shape and angle)
 - `src/svgExport.ts`: SVG and PNG export
 - `src/svgImport.ts`: exact and fitted SVG import
+- `src/pngImport.ts`: pixel art to tiles, with scale detection, colour reduction and rounded depth
 - `src/mesh.ts`: extrudes tiles into a mesh, one part per colour
 - `src/modelExport.ts`: GLB and OBJ export
 - `src/preview3d.ts`: Three.js viewport

@@ -221,6 +221,37 @@
           <p class="hint">SVGs exported by Kenney Shape or this editor import exactly. Other SVGs are fitted to the grid, choosing the best shape and colour for each tile.</p>
           <button id="btn-import-svg" class="wide">Import SVG…</button>
         </section>
+        <section>
+          <h2>PNG import</h2>
+          <label>Size
+            <select id="png-size">
+              <option value="pixel" selected>1 pixel = 1 tile</option>
+              <option value="32">At most 32×32</option>
+              <option value="48">At most 48×48</option>
+              <option value="64">At most 64×64</option>
+            </select>
+          </label>
+          <label>Colours
+            <select id="png-colors">
+              <option value="64" selected>The image's colours (up to 64)</option>
+              <option value="32">Reduce to 32</option>
+              <option value="16">Reduce to 16</option>
+              <option value="project">Snap to current palette</option>
+            </select>
+          </label>
+          <div class="row tight-top">
+            <label class="inline">Depth
+              <select id="png-depth">
+                <option value="rounded" selected>Rounded</option>
+                <option value="flat">Flat</option>
+              </select>
+            </label>
+            <label class="inline"><input type="number" id="png-thickness" min="1" max="20" placeholder="auto" title="Depth of the thickest part (rounded) or of every tile (flat). Leave empty to fit the sprite's size." /> deep</label>
+          </div>
+          <label class="check"><input type="checkbox" id="png-trim" checked /> Trim transparent edges</label>
+          <p class="hint">For pixel art: each pixel becomes a square tile. Scaled-up sprites are detected and sampled back to their real pixels. Rounded depth makes the middle of the shape thicker than its edges.</p>
+          <button id="btn-import-png" class="wide">Import PNG…</button>
+        </section>
       </aside>
     </main>
 
