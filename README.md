@@ -1,6 +1,37 @@
 # 3dpixel
 
 A local web editor for tile-shape game assets, compatible with Kenney Shape's `.kenshape` files.
+Draw with tiles, extrude to 3D, rig, animate, and export GLB models with their animations, sprite
+sheets or GIFs.
+
+## Examples
+
+Each model below was drawn as tiles, split into parts and animated with a preset. The GIFs come
+from 3dpixel's own GIF export. The projects are in [`examples/`](examples): open one, pick a clip
+on the play bar, and press Space.
+
+| ![A blocky person walking](docs/images/human-walk.gif) | ![The same person running, leaning forward](docs/images/human-run.gif) | ![A turtle pulling its head, legs and tail into its shell, then peeking out](docs/images/turtle-hide.gif) |
+| :---: | :---: | :---: |
+| **Walk**: Biped template, Walk preset | **Run**: Run preset, with a bigger swing and a forward lean | **Hide**: Shell creature template, Hide preset (hide, then peek) |
+| ![A turtle walking slowly](docs/images/turtle-walk.gif) | ![A wheel spinning on its axle](docs/images/wheel-spin.gif) | ![The walk as a flat 2D sprite](docs/images/human-walk-sprite.gif) |
+| **Walk**: a slow four-beat walk | **Spin**: one part imported from an SVG, Spin preset | **Sprite**: the walk exported with the flat front view, for 2D games |
+
+How they were made:
+- **Human** ([`examples/human.kenshape`](examples/human.kenshape)):
+  1. Draw a side-on figure.
+  2. Select the head, arm and leg in turn and press Ctrl+J to make each a part.
+  3. Use **Far copy** for the far arm and leg.
+  4. Pick the **Biped** template, which guesses each part's role.
+  5. Click **Walk**, **Run** or **Idle**.
+- **Turtle** ([`examples/turtle.kenshape`](examples/turtle.kenshape)): the same steps, with the
+  **Shell creature** template and the **Hide** and **Walk** presets.
+- **Wheel** ([`examples/wheel.kenshape`](examples/wheel.kenshape)): import an SVG of a wheel, then
+  click **Spin**. The pivot is already at the hub.
+
+The flat view also exports sprite sheets with a JSON of frames and clip tags. This is the turtle
+hiding at 8 fps:
+
+![The turtle hiding, as a strip of sprite frames](docs/images/turtle-hide-sheet.png)
 
 ## Run
 

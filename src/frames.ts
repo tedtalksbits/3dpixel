@@ -7,7 +7,7 @@
 
 import {
   WebGLRenderer, Scene, PerspectiveCamera, OrthographicCamera, HemisphereLight, DirectionalLight, Box3, Vector3, Mesh,
-  MeshBasicMaterial, MeshStandardMaterial, Object3D, Sphere, Color,
+  MeshBasicMaterial, MeshStandardMaterial, Object3D, Color,
 } from 'three';
 import { Project } from './kenshape';
 import { Part } from './rig';
@@ -86,15 +86,26 @@ export function renderClips(p: Project, parts: Part[], clips: Clip[], opts: Fram
   }
   scene.add(group);
 
-  // fit the camera once to the model's extent over every frame of every clip
+  // fit the camera once to the model's extent over every frame of every clip, from its actual
+  // vertices: boxes around rotated parts are much looser (a spinning wheel's grows by ~40%)
   const plan = clips.map((clip) => ({ clip, times: frameTimes(clip, opts.fps) }));
+  const eachPose = (fn: () => void) => {
+    for (const { clip, times } of plan)
+      for (const t of times) {
+        poseGroup(group, evalClip(clip, t));
+        group.updateMatrixWorld(true);
+        fn();
+      }
+  };
+  const v = new Vector3();
+  const eachVertex = (fn: (p: Vector3) => void) =>
+    group.traverse((o) => {
+      if (!(o instanceof Mesh)) return;
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) fn(v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld));
+    });
   const box = new Box3();
-  for (const { clip, times } of plan)
-    for (const t of times) {
-      poseGroup(group, evalClip(clip, t));
-      group.updateMatrixWorld(true);
-      box.union(new Box3().setFromObject(group));
-    }
+  eachPose(() => eachVertex((p) => box.expandByPoint(p)));
   if (box.isEmpty()) box.set(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
   const centre = box.getCenter(new Vector3());
 
@@ -109,11 +120,28 @@ export function renderClips(p: Project, parts: Part[], clips: Clip[], opts: Fram
     camera.position.copy(opts.camera.position);
     camera.lookAt(opts.camera.target);
   } else {
-    const sphere = box.getBoundingSphere(new Sphere());
-    camera = new PerspectiveCamera(35, 1, 0.1, 5000);
-    const dist = (sphere.radius / Math.sin((camera.fov * Math.PI) / 360)) * 1.02;
-    camera.position.copy(new Vector3(0.45, 0.3, 1).normalize().multiplyScalar(dist).add(sphere.center));
-    camera.lookAt(sphere.center);
+    // start from a sphere that surely fits, then move in until the model's projection fills the frame
+    let radius = 0;
+    eachPose(() => eachVertex((p) => (radius = Math.max(radius, p.distanceTo(centre)))));
+    const cam = new PerspectiveCamera(35, 1, 0.1, 5000);
+    const dir = new Vector3(0.45, 0.3, 1).normalize();
+    let dist = (Math.max(radius, 0.5) / Math.sin((cam.fov * Math.PI) / 360)) * 1.02;
+    for (let pass = 0; pass < 3; pass++) {
+      cam.position.copy(dir).multiplyScalar(dist).add(centre);
+      cam.lookAt(centre);
+      cam.updateMatrixWorld(true);
+      cam.updateProjectionMatrix();
+      let extent = 0;
+      eachPose(() => eachVertex((p) => {
+        const q = p.clone().project(cam);
+        extent = Math.max(extent, Math.abs(q.x), Math.abs(q.y));
+      }));
+      if (extent <= 0) break;
+      dist *= extent / 0.92;
+    }
+    cam.position.copy(dir).multiplyScalar(dist).add(centre);
+    cam.lookAt(centre);
+    camera = cam;
   }
   camera.updateProjectionMatrix();
 
