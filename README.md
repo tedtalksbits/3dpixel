@@ -131,6 +131,23 @@ other browsers download a copy instead.
   - Presets drive parts by role, so any model rigged with the template works, and roles with no
     part are skipped. They follow the rig live: change a role, the facing or a pivot and the
     animation updates.
+- **Keyframing by hand**:
+  - **Dope sheet** ("Keys" on the play bar): each part has a row of its keys over time, and ▸
+    opens rows for Rotate, Move and Scale. Click a key to select it (Shift adds), drag to move
+    keys in time (snapped to frames), double-click empty space to key that part's pose there,
+    click empty space to move the playhead, and press Delete to remove the selected keys. A held
+    (step) stretch shows as a dashed line.
+  - **Pose mode** (the Pose button in the 3D view): drag a part to rotate it about its pivot, or
+    Shift-drag to move it. Each drag keys the pose at the playhead, and clicking a part selects
+    it. Dragging empty space still orbits the camera.
+  - **Curve editor** (Animation panel): shows how the value moves from a key to the next. Pick a
+    named ease, or drag the two handles for a custom cubic Bézier, the same as CSS
+    `cubic-bezier()`, with overshoot. Dragging a handle on a named ease starts from that ease's
+    own curve. It edits the selected keys, or the selected part's keys at the playhead.
+  - **Onion skin** ("Onion" on the play bar): ghosts of the model 3 frames before (red) and after
+    (blue) the playhead, so you can judge spacing while you pose.
+  - Editing a key that a live preset made turns that preset into plain keys first. Everything is
+    covered by undo.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -161,6 +178,7 @@ other browsers download a copy instead.
 | R / Shift+R | Rotate the brush shape |
 | ` | Cycle 2D / Split / 3D view |
 | Space | Play / pause the clip |
+| Delete (dope sheet open) | Delete the selected keys |
 | , / . | Step one frame back / forward |
 | Drag / right-drag / scroll in 3D | Orbit / pan / zoom |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
@@ -191,6 +209,8 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/presets.ts`: animation presets that generate keyframe tracks
 - `src/templates.ts`: rig templates, roles and role guessing
 - `src/creatures.ts`: biped, four-legged and shell creature presets
+- `src/dopesheet.ts`: the dope sheet
+- `src/curveEditor.ts`: the ease curve editor
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

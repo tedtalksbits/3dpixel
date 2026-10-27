@@ -139,8 +139,9 @@ it has a clip.
 
 - `prop` is `rotation` (Euler degrees, XYZ order), `position` (an offset in tiles, +Y up) or
   `scale`.
-- `ease` applies from that key to the next. It's `linear`, `step`, or `<family>.<in|out|inOut>`
-  with sine, quad, cubic, quart, quint, expo, circ, back, elastic or bounce.
+- `ease` applies from that key to the next. It's `linear`, `step`, `<family>.<in|out|inOut>`
+  with sine, quad, cubic, quart, quint, expo, circ, back, elastic or bounce, or a custom curve
+  `bezier:x1,y1,x2,y2`, the same as CSS `cubic-bezier()`, with x1 and x2 in 0–1.
 - Before the first key a track holds that key's value. After the last key it also holds, except in
   a looping clip, where it eases back into the first key at the loop point.
 - On GLB export each clip is sampled at 30 fps plus every key time, and just before a step key's

@@ -315,3 +315,46 @@ button.icon.small { padding: 1px 6px; font-size: 13px; }
 .panel .rig-template label.role-row select { width: 58%; padding: 3px 5px; font-size: 12px; }
 .panel .rig-template label.role-row.unset span { color: var(--muted); }
 #anim h3 .hint { margin-left: 4px; }
+
+/* dope sheet */
+.playbar .pb-toggle { font-size: 12px; padding: 4px 9px; }
+.playbar .pb-toggle.active { border-color: var(--accent); color: var(--accent); }
+.dopesheet { height: 190px; overflow: auto; background: var(--panel); border-top: 1px solid var(--line); user-select: none; }
+.ds-empty { padding: 14px; }
+.ds-grid { position: relative; min-width: 100%; }
+.ds-row { display: flex; height: 22px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.ds-row.ruler { height: 20px; position: sticky; top: 0; z-index: 3; background: var(--panel); }
+.ds-row.part.active .ds-label { color: var(--accent); }
+.ds-row.part { background: color-mix(in srgb, var(--panel-2) 45%, transparent); }
+.ds-label { flex: 0 0 170px; display: flex; align-items: center; gap: 4px; padding-right: 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--line); position: sticky; left: 0; background: inherit; z-index: 2; }
+.ds-label.sub { color: var(--muted); font-size: 11px; }
+.ds-row.ruler .ds-label { font-size: 10px; }
+.ds-toggle { background: none; border: 0; padding: 0 2px; color: var(--muted); font-size: 10px; width: 14px; }
+.ds-tag { font-size: 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; margin-left: 4px; }
+.ds-lane { position: relative; flex: 1; min-width: 300px; cursor: pointer; }
+.ds-sec { position: absolute; top: 3px; font-size: 10px; color: var(--muted); transform: translateX(-50%); pointer-events: none; }
+.ds-frame { position: absolute; bottom: 0; width: 1px; height: 4px; background: var(--line); pointer-events: none; }
+.ds-key { position: absolute; top: 6px; width: 9px; height: 9px; margin-left: -4.5px; background: #ffb020; border: 1px solid rgba(0, 0, 0, 0.45); transform: rotate(45deg); cursor: ew-resize; z-index: 1; }
+.ds-key.sum { background: var(--muted); }
+.ds-row.part.active .ds-key.sum { background: var(--accent); }
+.ds-key.sel { background: #fff !important; box-shadow: 0 0 0 2px #ff3b6b; }
+.ds-seg { position: absolute; top: 10px; height: 2px; background: color-mix(in srgb, #ffb020 45%, transparent); pointer-events: none; }
+.ds-seg.hold { background: none; border-top: 2px dashed color-mix(in srgb, #ffb020 60%, transparent); height: 0; }
+.ds-headwrap { position: absolute; top: 0; bottom: 0; left: 170px; right: 0; pointer-events: none; z-index: 2; }
+.ds-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ff3b6b; }
+
+/* curve editor */
+.curve-editor { margin-top: 8px; padding: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+.ce-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.ce-select { width: 100%; background: var(--panel); }
+.ce-graph { display: block; margin-top: 6px; background: var(--panel); border-radius: 4px; touch-action: none; }
+.ce-box { fill: none; stroke: var(--line); stroke-dasharray: 3 3; }
+.ce-label { fill: var(--muted); font-size: 9px; }
+.ce-curve { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.ce-arm { stroke: var(--muted); stroke-width: 1; }
+.ce-handle { fill: #fff; stroke: var(--accent); stroke-width: 2; cursor: grab; }
+.ce-handle:hover { fill: var(--accent); }
+
+/* pose mode */
+.overlay-btn.left { right: auto; left: 10px; }
+.overlay-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }

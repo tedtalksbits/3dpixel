@@ -3,7 +3,8 @@
 
 export type EaseFamily = 'sine' | 'quad' | 'cubic' | 'quart' | 'quint' | 'expo' | 'circ' | 'back' | 'elastic' | 'bounce';
 export type EaseDir = 'in' | 'out' | 'inOut';
-export type Ease = 'linear' | 'step' | `${EaseFamily}.${EaseDir}`;
+/** `bezier:x1,y1,x2,y2` is a custom cubic Bézier, like CSS cubic-bezier(); x1 and x2 stay in [0, 1]. */
+export type Ease = 'linear' | 'step' | `${EaseFamily}.${EaseDir}` | `bezier:${string}`;
 
 const c1 = 1.70158;
 const c2 = c1 * 1.525;
@@ -40,11 +41,60 @@ const IN_OUT: Partial<Record<EaseFamily, (t: number) => number>> = {
     t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? -(2 ** (20 * t - 10) * Math.sin((20 * t - 11.125) * c5)) / 2 : (2 ** (-20 * t + 10) * Math.sin((20 * t - 11.125) * c5)) / 2 + 1,
 };
 
+const bezierCache = new Map<string, (t: number) => number>();
+
+export function parseBezier(name: string): [number, number, number, number] | null {
+  const m = /^bezier:(-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)$/.exec(name);
+  if (!m) return null;
+  const v = m.slice(1).map(Number) as [number, number, number, number];
+  return v.every(Number.isFinite) && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1 ? v : null;
+}
+
+export const bezierEase = (x1: number, y1: number, x2: number, y2: number): Ease =>
+  `bezier:${[x1, y1, x2, y2].map((n) => +n.toFixed(3)).join(',')}`;
+
+/** Progress -> eased progress for a cubic Bézier from (0,0) to (1,1), solving x for t like browsers do. */
+function bezier(x1: number, y1: number, x2: number, y2: number) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = (u: number) => ((ax * u + bx) * u + cx) * u;
+  const dX = (u: number) => (3 * ax * u + 2 * bx) * u + cx;
+  const Y = (u: number) => ((ay * u + by) * u + cy) * u;
+  return (x: number) => {
+    let u = x;
+    for (let i = 0; i < 8; i++) {
+      const err = X(u) - x;
+      const d = dX(u);
+      if (Math.abs(err) < 1e-7) return Y(u);
+      if (Math.abs(d) < 1e-6) break;
+      u -= err / d;
+    }
+    // Newton stalled on a flat spot: bisect instead
+    let lo = 0, hi = 1;
+    u = x;
+    for (let i = 0; i < 40; i++) {
+      if (X(u) < x) lo = u;
+      else hi = u;
+      u = (lo + hi) / 2;
+    }
+    return Y(u);
+  };
+}
+
 export function ease(name: Ease, t: number): number {
   if (t <= 0) return 0;
   if (t >= 1) return 1;
   if (name === 'linear') return t;
   if (name === 'step') return 0;
+  if (name.startsWith('bezier:')) {
+    let f = bezierCache.get(name);
+    if (!f) {
+      const b = parseBezier(name);
+      f = b ? bezier(...b) : (x: number) => x;
+      bezierCache.set(name, f);
+    }
+    return f(t);
+  }
   const [family, dir] = name.split('.') as [EaseFamily, EaseDir];
   const f = IN[family];
   if (!f) return t;
@@ -77,4 +127,6 @@ export const EASE_OPTIONS: [Ease, string][] = [
   ),
 ];
 
-export const isEase = (v: unknown): v is Ease => EASE_OPTIONS.some(([e]) => e === v);
+export const isEase = (v: unknown): v is Ease => typeof v === 'string' && (EASE_OPTIONS.some(([e]) => e === v) || !!parseBezier(v));
+
+export const easeLabel = (e: Ease) => EASE_OPTIONS.find(([o]) => o === e)?.[1] ?? (parseBezier(e) ? 'Custom curve' : e);

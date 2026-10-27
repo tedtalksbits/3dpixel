@@ -14,8 +14,10 @@ import { FileRef, FileType } from './platform';
 import {
   AutoExport, ExportTarget, TargetFormat, FORMATS, emptyAutoExport, takeAutoExport, withAutoExport, storePath, targetAbsPath, runAutoExport,
 } from './autoExport';
-import { Clip, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, snapTime, keyTimes, keysAt, deleteKeysAt, findTrack } from './anim';
-import { Ease, EASE_OPTIONS } from './easing';
+import { Clip, Key, Track, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, snapTime, keyTimes, keysAt, deleteKeysAt, findTrack } from './anim';
+import { Ease } from './easing';
+import { renderDopeSheet, bindDopeSheet, moveDopeHead, keyId, parseKeyId } from './dopesheet';
+import { renderCurveEditor, bindCurveEditor } from './curveEditor';
 import { PRESETS, PRESET_LIST, PresetDef, PresetId, PresetUse, PivotSpot, addPreset, applyPreset, removePreset, customisePreset, refreshPresets, presetsFor } from './presets';
 import { RigTemplate, TemplateKind, Facing, TEMPLATES, rigCtx, guessRoles, roleLabel } from './templates';
 import { Part, noTemplate, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
@@ -72,6 +74,10 @@ const state = {
   playing: false,
   keyEase: 'cubic.inOut' as Ease,
   template: noTemplate() as RigTemplate,
+  keySel: new Set<string>(), // keys selected in the dope sheet, by keyId
+  expanded: new Set<string>(), // parts opened up in the dope sheet
+  onion: false,
+  poseMode: false,
   tool: 'draw' as Tool,
   shape: 0,
   angle: 0,
@@ -116,6 +122,7 @@ function restore(s: Snapshot) {
   state.clips = s.clips;
   state.clip = Math.min(s.clip, s.clips.length - 1);
   state.template = s.template;
+  state.keySel.clear();
   state.sel = new Set(s.sel);
   state.float = null;
 }
@@ -148,6 +155,7 @@ function setProject(p: Project, file: FileRef | null = null) {
   state.clips = rig.clips;
   state.clip = rig.clips.length ? 0 : -1;
   state.template = rig.template;
+  state.keySel.clear();
   state.time = 0;
   state.project = p;
   state.undo = [];
@@ -1372,10 +1380,25 @@ const keyTime = () => snapTime(state.time);
 const fmtTime = (t: number) => `${t.toFixed(2)} s`;
 const round = (n: number, d = 2) => +n.toFixed(d);
 
+/** Onion skin: the pose a few frames before and after the playhead (none while playing). */
+const ONION_FRAMES = 3;
+function onionPoses() {
+  const c = activeClip();
+  if (!state.onion || state.playing || !c) return null;
+  const d = ONION_FRAMES / FPS;
+  const clamp = (t: number) => (c.loop ? t : Math.max(0, Math.min(c.duration, t)));
+  return [evalClip(c, clamp(state.time - d)), evalClip(c, clamp(state.time + d))];
+}
+
+function syncPreview() {
+  preview3d.setPose(currentPose());
+  preview3d.setOnion(onionPoses());
+}
+
 function setTime(t: number) {
   const c = activeClip();
   state.time = c ? Math.max(0, Math.min(c.duration, t)) : 0;
-  preview3d.setPose(currentPose());
+  syncPreview();
   renderPlaybar();
   renderPose();
 }
@@ -1389,6 +1412,7 @@ function play() {
   if (viewMode === '2d') setView('split');
   if (!c.loop && state.time >= c.duration) state.time = 0;
   state.playing = true;
+  preview3d.setOnion(null);
   lastTick = performance.now();
   const tick = (now: number) => {
     if (!state.playing) return;
@@ -1453,7 +1477,7 @@ function keyValue(prop: Prop, axis: 0 | 1 | 2, value: number) {
   checkpoint();
   releasePresets(c, activePart().id, [prop]);
   setKey(c, activePart().id, prop, keyTime(), axis, value, state.keyEase);
-  preview3d.setPose(currentPose());
+  syncPreview();
   renderPlaybar();
   renderPose();
 }
@@ -1503,8 +1527,14 @@ function renderPlaybar() {
       <button id="pb-play" class="icon" title="Play / pause (Space)"></button>
       <select id="pb-clip" title="Clip"></select>
       <div class="pb-track" id="pb-track"><div class="pb-ticks" id="pb-ticks"></div><div class="pb-head" id="pb-head"></div></div>
-      <span class="pb-time mono" id="pb-time"></span>`;
+      <span class="pb-time mono" id="pb-time"></span>
+      <button id="pb-onion" class="pb-toggle" title="Onion skin: show the pose ${ONION_FRAMES} frames before (red) and after (blue) the playhead">Onion</button>
+      <button id="pb-keys" class="pb-toggle" title="Show the dope sheet: every part's keys over time">Keys ▴</button>`;
   }
+  $('pb-onion').classList.toggle('active', state.onion);
+  $('pb-keys').classList.toggle('active', dopeOpen);
+  $('pb-keys').textContent = dopeOpen ? 'Keys ▾' : 'Keys ▴';
+  renderDope();
   $('pb-play').textContent = state.playing ? '❚❚' : '▶';
   $<HTMLButtonElement>('pb-play').disabled = !c;
   const sel = $<HTMLSelectElement>('pb-clip');
@@ -1694,7 +1724,6 @@ function renderPose() {
   const at = keyTime();
   const keys = keysAt(c, part.id, at);
   const keyedProp = (prop: Prop) => !!findTrack(c, part.id, prop)?.keys.some((k) => Math.abs(k.t - at) < 1e-6);
-  const shownEase = keys[0]?.ease ?? state.keyEase;
   host.innerHTML = `
     <div class="row tight"><input id="clip-name" class="grow" value="${escapeHtml(c.name)}" spellcheck="false" title="Clip name" />
       <button id="clip-delete" class="icon small" title="Delete this clip">×</button></div>
@@ -1708,17 +1737,32 @@ function renderPose() {
     ${poseInputs('rotation', 'Rotate°', pose?.rotation ?? REST.rotation, keyedProp('rotation'), 5, 'Degrees about each axis. Z swings a part in a side view.')}
     ${poseInputs('position', 'Move', pose?.position ?? REST.position, keyedProp('position'), 0.25, 'Offset in tiles. +Y is up.')}
     ${poseInputs('scale', 'Scale', pose?.scale ?? REST.scale, keyedProp('scale'), 0.1, '1 is normal size.')}
-    <label>Ease to next key <select id="key-ease">${EASE_OPTIONS.map(([e, l]) => `<option value="${e}"${e === shownEase ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div id="curve-editor" class="curve-editor"></div>
     <div class="btn-grid">
       <button id="key-prev" title="Previous key of this part">◀ Key</button>
       <button id="key-next" title="Next key of this part">Key ▶</button>
       <button id="key-pose" title="Key rotation, position and scale as they are now">Key pose</button>
       <button id="key-delete"${keys.length ? '' : ' disabled'} title="Delete this part's keys at the playhead">Delete key</button>
     </div>`;
+  renderCurve();
 }
 
 $('playbar').addEventListener('click', (e) => {
-  if ((e.target as HTMLElement).closest('#pb-play')) togglePlay();
+  const b = (e.target as HTMLElement).closest('button');
+  if (b?.id === 'pb-play') togglePlay();
+  else if (b?.id === 'pb-onion') {
+    state.onion = !state.onion;
+    syncPreview();
+    renderPlaybar();
+  } else if (b?.id === 'pb-keys') {
+    dopeOpen = !dopeOpen;
+    try {
+      localStorage.setItem('3dpixel.dopesheet', dopeOpen ? '1' : '');
+    } catch {}
+    renderPlaybar();
+    fitScale();
+    renderCanvas();
+  }
 });
 $('playbar').addEventListener('change', (e) => {
   const sel = e.target as HTMLSelectElement;
@@ -1728,6 +1772,7 @@ $('playbar').addEventListener('change', (e) => {
   if (value === 'new') return addClip();
   state.clip = +value;
   state.time = 0;
+  state.keySel.clear();
   renderAll();
 });
 $('playbar').addEventListener('pointerdown', (e) => {
@@ -1818,7 +1863,7 @@ animHost.addEventListener('input', (e) => {
 animHost.addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement;
   const c = activeClip();
-  if (!c) return;
+  if (!c || el.matches('.ce-select')) return; // the curve editor handles its own menu
   if (el.dataset.use) {
     setPresetParam(el, false);
     el.blur();
@@ -1827,17 +1872,6 @@ animHost.addEventListener('change', (e) => {
   if (el.dataset.prop) {
     el.blur();
     return keyValue(el.dataset.prop as Prop, +el.dataset.axis! as 0 | 1 | 2, +el.value || 0);
-  }
-  if (el.id === 'key-ease') {
-    state.keyEase = el.value as Ease;
-    const keys = keysAt(c, activePart().id, keyTime());
-    if (keys.length) {
-      checkpoint();
-      releasePresets(c, activePart().id);
-      for (const k of keys) k.ease = state.keyEase;
-      preview3d.setPose(currentPose());
-    }
-    return;
   }
   checkpoint();
   if (el.id === 'clip-name') c.name = el.value.trim().replace(/\s+/g, '_') || c.name;
@@ -1851,11 +1885,204 @@ animHost.addEventListener('change', (e) => {
   renderAll();
 });
 
+// ---------- dope sheet, curve editor, posing in 3D ----------
+
+let dopeOpen = false;
+try {
+  dopeOpen = localStorage.getItem('3dpixel.dopesheet') === '1';
+} catch {}
+
+function renderDope() {
+  const host = $('dopesheet');
+  host.classList.toggle('hidden', !dopeOpen);
+  if (!dopeOpen) return;
+  if (state.playing) return moveDopeHead(host, activeClip(), state.time);
+  renderDopeSheet(host, {
+    clip: activeClip(),
+    rows: treeOrder(state.parts).map((part) => ({ part, depth: partDepth(part) })),
+    active: activePart().id,
+    time: state.time,
+    selected: state.keySel,
+    expanded: state.expanded,
+  });
+}
+
+/** Keys the curve editor and Delete act on: the dope sheet selection, else the active part's keys at the playhead. */
+function targetKeys(): { part: string; prop: Prop; key: Key }[] {
+  const c = activeClip();
+  if (!c) return [];
+  const want = state.keySel.size
+    ? [...state.keySel].map(parseKeyId)
+    : c.tracks.filter((tr) => tr.part === activePart().id).map((tr) => ({ part: tr.part, prop: tr.prop, t: keyTime() }));
+  return want.flatMap(({ part, prop, t }) => {
+    const key = findTrack(c, part, prop)?.keys.find((k) => Math.abs(k.t - t) < 1e-4);
+    return key ? [{ part, prop, key }] : [];
+  });
+}
+
+function curveTarget(): { ease: Ease | null; title: string } {
+  const keys = targetKeys();
+  if (!keys.length) return { ease: state.keyEase, title: 'Ease for new keys' };
+  const first = keys[0].key.ease;
+  const same = keys.every((k) => k.key.ease === first);
+  const title = state.keySel.size
+    ? `Ease from ${keys.length} selected key${keys.length === 1 ? '' : 's'}`
+    : `Ease from this key to the next`;
+  return { ease: same ? first : null, title };
+}
+
+function renderCurve() {
+  const host = document.getElementById('curve-editor');
+  if (!host) return;
+  const { ease, title } = curveTarget();
+  renderCurveEditor(host, ease, title);
+}
+
+let curveDrag = false;
+bindCurveEditor(animHost, () => curveTarget().ease, {
+  change(e, live) {
+    const c = activeClip();
+    const keys = targetKeys();
+    state.keyEase = e;
+    if (c && keys.length) {
+      if (!curveDrag) {
+        checkpoint();
+        for (const k of keys) releasePresets(c, k.part, [k.prop]);
+      }
+      curveDrag = live;
+      // releasing presets rebuilt nothing, but find the keys again in case tracks were replaced
+      for (const k of targetKeys()) k.key.ease = e;
+      syncPreview();
+    }
+    renderCurve();
+    if (!live) renderDope();
+  },
+});
+
+function selectKeys(ids: string[], add: boolean) {
+  if (!add) state.keySel = new Set(ids);
+  else if (ids.every((id) => state.keySel.has(id))) ids.forEach((id) => state.keySel.delete(id));
+  else ids.forEach((id) => state.keySel.add(id));
+  renderDope();
+  renderCurve();
+}
+
+/** Move the selected keys in time; a moved key replaces any key already at its new time. */
+function moveSelectedKeys(dt: number) {
+  const c = activeClip();
+  if (!c || !state.keySel.size) return;
+  checkpoint();
+  const moving = [...state.keySel].map(parseKeyId);
+  for (const m of moving) releasePresets(c, m.part, [m.prop]);
+  const picked: { tr: Track; key: Key }[] = [];
+  for (const m of moving) {
+    const tr = findTrack(c, m.part, m.prop);
+    const key = tr?.keys.find((k) => Math.abs(k.t - m.t) < 1e-4);
+    if (tr && key) picked.push({ tr, key });
+  }
+  for (const { tr, key } of picked) tr.keys = tr.keys.filter((k) => k !== key);
+  state.keySel.clear();
+  for (const { tr, key } of picked) {
+    key.t = Math.max(0, Math.min(c.duration, snapTime(key.t + dt)));
+    tr.keys = tr.keys.filter((k) => Math.abs(k.t - key.t) >= 1e-4 || picked.some((p) => p.key === k));
+    tr.keys.push(key);
+    tr.keys.sort((a, b) => a.t - b.t);
+    state.keySel.add(keyId(tr.part, tr.prop, key.t));
+  }
+  setTime(state.time + dt);
+  renderAll();
+}
+
+function deleteSelectedKeys() {
+  const c = activeClip();
+  if (!c || !state.keySel.size) return;
+  checkpoint();
+  for (const m of [...state.keySel].map(parseKeyId)) {
+    releasePresets(c, m.part, [m.prop]);
+    const tr = findTrack(c, m.part, m.prop);
+    if (tr) tr.keys = tr.keys.filter((k) => Math.abs(k.t - m.t) >= 1e-4);
+  }
+  c.tracks = c.tracks.filter((tr) => tr.keys.length);
+  const n = state.keySel.size;
+  state.keySel.clear();
+  flash(`Deleted ${n} key${n === 1 ? '' : 's'}`);
+  renderAll();
+}
+
+const selectPartById = (id: string) => {
+  const i = state.parts.findIndex((o) => o.id === id);
+  if (i >= 0 && i !== state.active) selectPart(i);
+};
+
+bindDopeSheet($('dopesheet'), activeClip, {
+  seek: (t) => {
+    if (state.playing) stop();
+    setTime(t);
+  },
+  selectPart: selectPartById,
+  select: selectKeys,
+  move: moveSelectedKeys,
+  keyPose: (part, t) => {
+    selectPartById(part);
+    setTime(t);
+    keyWholePose();
+  },
+  toggle: (part) => {
+    if (!state.expanded.delete(part)) state.expanded.add(part);
+    renderDope();
+  },
+});
+
+// pose mode: drag a part in the 3D view to rotate it about its pivot, Shift-drag to move it
+let poseStart: { part: string; rot: number; pos: [number, number] } | null = null;
+function setPoseMode(on: boolean) {
+  state.poseMode = on;
+  preview3d.poseMode = on;
+  $('btn-pose').classList.toggle('active', on);
+  if (on) flash('Pose mode: drag a part to rotate it, Shift-drag to move it. Each drag keys the pose at the playhead.');
+}
+$('btn-pose').addEventListener('click', () => setPoseMode(!state.poseMode));
+function bindPosing() {
+  preview3d.onPick = selectPartById;
+  preview3d.onPoseDrag = (d) => {
+    if (d.phase === 'start') {
+      if (state.playing) stop();
+      checkpoint();
+      if (!activeClip()) {
+        state.clips.push(newClip(uniqueClipName('pose')));
+        state.clip = state.clips.length - 1;
+      }
+      selectPartById(d.partId);
+      const pose = currentPose()?.get(d.partId);
+      poseStart = { part: d.partId, rot: pose?.rotation[2] ?? 0, pos: [pose?.position[0] ?? 0, pose?.position[1] ?? 0] };
+      releasePresets(activeClip()!, d.partId, [d.kind === 'rotate' ? 'rotation' : 'position']);
+      return;
+    }
+    const c = activeClip();
+    if (!c || !poseStart) return;
+    if (d.phase === 'move') {
+      if (d.kind === 'rotate') setKey(c, poseStart.part, 'rotation', keyTime(), 2, Math.round((poseStart.rot + d.angle) * 2) / 2, state.keyEase);
+      else {
+        const snap = (v: number) => Math.round(v * 8) / 8;
+        setKey(c, poseStart.part, 'position', keyTime(), 0, snap(poseStart.pos[0] + d.delta[0]), state.keyEase);
+        setKey(c, poseStart.part, 'position', keyTime(), 1, snap(poseStart.pos[1] + d.delta[1]), state.keyEase);
+      }
+      syncPreview();
+      refreshPoseFields();
+      renderPlaybar();
+      return;
+    }
+    poseStart = null;
+    renderAll();
+  };
+}
+
 // ---------- 3D ----------
 
 type ViewMode = '2d' | 'split' | '3d';
 const VIEWS: ViewMode[] = ['2d', 'split', '3d'];
 const preview3d = new Preview3D($('view3d'));
+bindPosing();
 let viewMode: ViewMode = 'split';
 try {
   const saved = localStorage.getItem('3dpixel.view') as ViewMode | null;
@@ -1880,7 +2107,7 @@ function schedule3d() {
   timer3d = window.setTimeout(() => {
     if (viewMode === '2d') return;
     preview3d.update(composite(), liveParts(), state.parts.length > 1 ? activePart().id : undefined);
-    preview3d.setPose(currentPose());
+    syncPreview();
   }, 30);
 }
 
@@ -2287,7 +2514,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (k === 'delete' || k === 'backspace') {
     e.preventDefault();
-    deleteSelection();
+    // keys picked in the dope sheet go first; otherwise it's the tile selection
+    if (state.keySel.size && dopeOpen) deleteSelectedKeys();
+    else deleteSelection();
     return;
   }
   if (k === '[' || k === ']') {
