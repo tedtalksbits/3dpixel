@@ -332,6 +332,11 @@ export class Preview3D {
     return !done;
   }
 
+  /** The current camera, for rendering frames from the same view. */
+  cameraInfo() {
+    return { position: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov };
+  }
+
   resetView() {
     const [x, y] = this.framedSize.split('x').map(Number);
     const r = Math.max(x || 16, y || 16) * 0.75;

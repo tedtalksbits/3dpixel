@@ -60,7 +60,7 @@ other browsers download a copy instead.
   Walls hidden between neighbouring tiles are removed. Export as glTF binary (`.glb`) or OBJ + MTL,
   with one material per palette colour. You can choose 1 tile = 1 unit or fit the model in 1 unit,
   and put the origin at the centre or the bottom centre.
-- **Export on save** (desktop app): give a project a list of export targets, such as
+- **Export on save** (desktop app): give a project a list of export targets (GLB, OBJ, PNG, SVG, sprite sheet or GIF), such as
   `../game/assets/sword.glb` and a 64×64 PNG, and every Ctrl+S rewrites them. Each target keeps its
   own options (PNG size, SVG grouping, model scale and origin), and missing folders are created.
   Paths are stored in the `.kenshape` relative to it, so the project can move along with your game.
@@ -148,6 +148,24 @@ other browsers download a copy instead.
     (blue) the playhead, so you can judge spacing while you pose.
   - Editing a key that a live preset made turns that preset into plain keys first. Everything is
     covered by undo.
+- **Animation export** (right panel): render clips to 2D images.
+  - **View:** **Flat front** is orthographic and unlit, so it keeps exact palette colours and
+    matches the 2D drawing. It's best for 2D games and gives small GIFs. There's also a lit
+    **Three-quarter** view, and **Current 3D view** uses whatever angle you've framed in the
+    preview.
+  - **Settings:** frame size, frame rate, smooth or hard edges, and a transparent or solid
+    background. Choose this clip or all clips.
+  - **Sprite sheet:** one PNG with a row per clip (or a packed grid), plus a JSON of frame
+    positions, durations and one tag per clip, in Aseprite's format. Phaser loads it directly,
+    and Godot and other engines have importers.
+  - **PNG frames:** one PNG per frame, named `name_clip_000.png`. In the browser they come as a
+    ZIP.
+  - **GIF:** an animated GIF per clip, looping. Sprites with 255 colours or fewer keep exact
+    colours, and transparency is kept.
+  - Frames are spaced evenly across the clip, so a sheet or GIF lasts exactly as long as the 3D
+    clip. Framing is fitted once over every frame, so the sprite doesn't jitter.
+  - Export on save can also write sprite sheets and GIFs, so your game's sprites update every
+    time you save.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -211,6 +229,10 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/creatures.ts`: biped, four-legged and shell creature presets
 - `src/dopesheet.ts`: the dope sheet
 - `src/curveEditor.ts`: the ease curve editor
+- `src/frames.ts`: renders clips to image frames
+- `src/animExport.ts`: sprite sheets with JSON, PNG frames and GIFs from rendered frames
+- `src/gif.ts`: animated GIF encoder
+- `src/zip.ts`: ZIP writer for PNG frames
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

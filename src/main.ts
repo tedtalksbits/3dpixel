@@ -18,6 +18,9 @@ import { Clip, Key, Track, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, sna
 import { Ease } from './easing';
 import { renderDopeSheet, bindDopeSheet, moveDopeHead, keyId, parseKeyId } from './dopesheet';
 import { renderCurveEditor, bindCurveEditor } from './curveEditor';
+import { FrameView, renderClips, canvasBlob } from './frames';
+import { SheetLayout, sheetFiles, gifOf, frameName, clipSlug } from './animExport';
+import { zip } from './zip';
 import { PRESETS, PRESET_LIST, PresetDef, PresetId, PresetUse, PivotSpot, addPreset, applyPreset, removePreset, customisePreset, refreshPresets, presetsFor } from './presets';
 import { RigTemplate, TemplateKind, Facing, TEMPLATES, rigCtx, guessRoles, roleLabel } from './templates';
 import { Part, noTemplate, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
@@ -889,6 +892,7 @@ function renderPanels() {
   }
   platform.setWindowTitle(`${name}${state.dirty ? ' •' : ''} — 3dpixel`);
   renderAutoExport();
+  renderAnimExport();
   renderParts();
   renderPlaybar();
   renderPose();
@@ -2077,6 +2081,155 @@ function bindPosing() {
   };
 }
 
+// ---------- animation export: sprite sheets, PNG frames, GIFs ----------
+
+interface AnimOut {
+  which: 'this' | 'all';
+  view: FrameView;
+  size: number;
+  fps: number;
+  smooth: boolean;
+  transparent: boolean;
+  layout: SheetLayout;
+}
+const animOut: AnimOut = { which: 'all', view: 'front', size: 128, fps: 12, smooth: true, transparent: true, layout: 'rows' };
+try {
+  Object.assign(animOut, JSON.parse(localStorage.getItem('3dpixel.animExport') ?? '{}'));
+} catch {}
+
+function renderAnimExport() {
+  const host = $('anim-export');
+  if (host.contains(document.activeElement) && document.activeElement?.matches('input[type=number]')) return;
+  const animated = state.clips.filter((c) => c.tracks.length);
+  if (!animated.length) {
+    host.innerHTML = `<p class="hint">Make an animation clip first. Then export it as a sprite sheet, PNG frames or a GIF.</p>`;
+    return;
+  }
+  const sel = (key: keyof AnimOut, items: [string, string][]) =>
+    `<select data-ao="${key}">${items.map(([v, l]) => `<option value="${v}"${String(animOut[key]) === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+  const c = activeClip();
+  host.innerHTML = `
+    <label>Clips ${sel('which', [['this', `This clip${c ? ` (${escapeHtml(c.name)})` : ''}`], ['all', `All ${animated.length} clips`]])}</label>
+    <label>View ${sel('view', [['front', 'Flat front: exact colours'], ['angle', 'Three-quarter, lit'], ['camera', 'Current 3D view']])}</label>
+    <div class="row tight-top">
+      <label class="inline">Frame <input type="number" min="8" max="2048" data-ao="size" value="${animOut.size}" /> px</label>
+      <label class="inline">${sel('fps', [['8', '8'], ['12', '12'], ['15', '15'], ['24', '24'], ['30', '30']])} fps</label>
+    </div>
+    <label class="check"><input type="checkbox" data-ao="smooth"${animOut.smooth ? ' checked' : ''} /> Smooth edges</label>
+    <label class="check"><input type="checkbox" data-ao="transparent"${animOut.transparent ? ' checked' : ''} /> Transparent background</label>
+    <label>Sheet layout ${sel('layout', [['rows', 'One row per clip'], ['grid', 'Packed grid']])}</label>
+    <div class="btn-grid three">
+      <button id="ao-sheet" title="One PNG with every frame, plus a JSON of frame positions, durations and clip tags (Aseprite format)">Sheet</button>
+      <button id="ao-frames" title="A PNG per frame (a ZIP in the browser)">PNG frames</button>
+      <button id="ao-gif" title="An animated GIF per clip">GIF</button>
+    </div>
+    <p class="hint" id="ao-note"></p>`;
+}
+
+function renderFrames() {
+  const animated = state.clips.filter((c) => c.tracks.length);
+  const clips = animOut.which === 'this' && activeClip()?.tracks.length ? [activeClip()!] : animated;
+  if (!clips.length) throw new Error('no animation clips');
+  return renderClips(state.project, state.parts, clips, {
+    size: animOut.size,
+    fps: animOut.fps,
+    view: animOut.view,
+    smooth: animOut.smooth,
+    background: animOut.transparent ? null : settings.bg3d,
+    camera: preview3d.cameraInfo(),
+  });
+}
+
+const PNG: FileType = FORMATS.png;
+const JSON_TYPE: FileType = { description: 'JSON', ext: 'json', mime: 'application/json' };
+
+async function exportAnim(kind: 'sheet' | 'frames' | 'gif') {
+  commitFloat();
+  if (state.playing) stop();
+  const note = document.getElementById('ao-note');
+  if (note) note.textContent = 'Rendering…';
+  await new Promise((r) => setTimeout(r, 20)); // let the note paint
+  try {
+    const frames = renderFrames();
+    const count = frames.reduce((n, f) => n + f.frames.length, 0);
+    const base = safeName();
+    if (kind === 'sheet') {
+      if (platform.isDesktop) {
+        const path = await platform.pickSavePath(`${base}-sheet.png`, PNG, state.file?.path);
+        if (!path) return;
+        const { png, json } = await sheetFiles(frames, animOut.layout, platform.stripExt(platform.basename(path)));
+        await platform.writePath(path, png);
+        await platform.writePath(platform.stripExt(path) + '.json', json);
+        flash(`Exported ${platform.basename(path)} and its .json: ${count} frames`);
+      } else {
+        const { png, json } = await sheetFiles(frames, animOut.layout, `${base}-sheet`);
+        const res = await platform.saveFile(png, `${base}-sheet.png`, PNG);
+        if (!res) return;
+        const jsonName = res.name.replace(/\.png$/i, '') + '.json';
+        await platform.saveFile(new Blob([json], { type: 'application/json' }), jsonName, JSON_TYPE);
+        flash(`Exported ${res.name} and ${jsonName}: ${count} frames`);
+      }
+    } else if (kind === 'frames') {
+      const all = frames.flatMap((f) => f.frames.map((c, i) => ({ c, name: frameName(base, f, i) })));
+      if (platform.isDesktop) {
+        // pick where the first frame goes; the rest go beside it
+        const path = await platform.pickSavePath(all[0].name, PNG, state.file?.path);
+        if (!path) return;
+        const dir = platform.dirname(path);
+        const suffix = `_${clipSlug(frames[0].clip.name)}_000`;
+        const picked = platform.stripExt(platform.basename(path));
+        const chosen = (picked.endsWith(suffix) ? picked.slice(0, -suffix.length) : picked) || base;
+        for (const f of frames) for (let i = 0; i < f.frames.length; i++) await platform.writePath(platform.resolvePath(dir, frameName(chosen, f, i)), await canvasBlob(f.frames[i]));
+        flash(`Exported ${count} frames to ${platform.basename(dir)}`);
+      } else {
+        const files = await Promise.all(all.map(async ({ c, name }) => ({ name, data: new Uint8Array(await (await canvasBlob(c)).arrayBuffer()) })));
+        await platform.saveFile(zip(files), `${base}-frames.zip`, { description: 'ZIP archive', ext: 'zip', mime: 'application/zip' });
+        flash(`Exported ${count} frames as ${base}-frames.zip`);
+      }
+    } else {
+      const gifs = frames.map((f) => ({ name: frames.length === 1 ? `${base}.gif` : `${base}-${clipSlug(f.clip.name)}.gif`, blob: new Blob([gifOf(f) as Uint8Array<ArrayBuffer>], { type: 'image/gif' }) }));
+      if (platform.isDesktop) {
+        const path = await platform.pickSavePath(gifs[0].name, FORMATS.gif, state.file?.path);
+        if (!path) return;
+        const dir = platform.dirname(path);
+        const picked = platform.stripExt(platform.basename(path));
+        const suffix = `-${clipSlug(frames[0].clip.name)}`;
+        const stem = gifs.length > 1 && picked.endsWith(suffix) ? picked.slice(0, -suffix.length) : picked;
+        if (gifs.length === 1) await platform.writePath(path, gifs[0].blob);
+        else for (const [i, g] of gifs.entries()) await platform.writePath(platform.resolvePath(dir, `${stem}-${clipSlug(frames[i].clip.name)}.gif`), g.blob);
+        flash(`Exported ${gifs.length} GIF${gifs.length === 1 ? '' : 's'}`);
+      } else {
+        for (const g of gifs) platform.download(g.blob, g.name);
+        flash(`Downloaded ${gifs.map((g) => g.name).join(', ')}`);
+      }
+    }
+  } catch (err: any) {
+    flash(`Animation export failed: ${err?.message ?? err}`, true);
+  } finally {
+    renderAnimExport();
+  }
+}
+
+const aoHost = $('anim-export');
+aoHost.addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement;
+  const key = el.dataset.ao as keyof AnimOut | undefined;
+  if (!key) return;
+  const v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Math.max(8, Math.min(2048, Math.round(+el.value || 128))) : key === 'fps' ? +el.value : el.value;
+  (animOut as any)[key] = v;
+  try {
+    localStorage.setItem('3dpixel.animExport', JSON.stringify(animOut));
+  } catch {}
+  el.blur();
+  renderAnimExport();
+});
+aoHost.addEventListener('click', (e) => {
+  const id = (e.target as HTMLElement).closest('button')?.id;
+  if (id === 'ao-sheet') exportAnim('sheet');
+  else if (id === 'ao-frames') exportAnim('frames');
+  else if (id === 'ao-gif') exportAnim('gif');
+});
+
 // ---------- 3D ----------
 
 type ViewMode = '2d' | 'split' | '3d';
@@ -2337,6 +2490,11 @@ function targetOptions(t: ExportTarget, i: number) {
         <label class="check" title="No anti-aliasing"><input type="checkbox" data-target="${i}" data-key="crisp"${t.crisp ? ' checked' : ''} /> Crisp</label>`;
     case 'svg':
       return sel('grouping', t.grouping ?? 'shape', [['shape', 'Per tile'], ['color', 'Per colour']]);
+    case 'sheet':
+    case 'gif':
+      return `<input type="number" min="8" max="2048" data-target="${i}" data-key="size" value="${t.size ?? 128}" title="Frame size in pixels" />` +
+        sel('fps', String(t.fps ?? 12), [['8', '8 fps'], ['12', '12 fps'], ['15', '15 fps'], ['24', '24 fps'], ['30', '30 fps']]) +
+        sel('view', t.view ?? 'front', [['front', 'Flat'], ['angle', '3/4']]);
     default:
       return (
         sel('scale', t.scale ?? 'tile', [['tile', '1 tile = 1'], ['fit', 'Fit in 1']]) +
@@ -2348,7 +2506,7 @@ function targetOptions(t: ExportTarget, i: number) {
 function renderAutoExport() {
   const host = $('auto-export');
   if (!platform.isDesktop) {
-    host.innerHTML = `<p class="hint">In the desktop app, saving can also write GLB, OBJ, PNG and SVG files straight into your game's asset folders.</p>`;
+    host.innerHTML = `<p class="hint">In the desktop app, saving can also write GLB, OBJ, PNG, SVG, sprite sheet and GIF files straight into your game's asset folders.</p>`;
     return;
   }
   // skip re-rendering while the user is typing in one of the target fields
@@ -2392,6 +2550,7 @@ async function addTarget(format: TargetFormat) {
   if (format === 'png') Object.assign(t, { size: pngSize(), crisp: $<HTMLInputElement>('png-crisp').checked });
   if (format === 'svg') t.grouping = $<HTMLSelectElement>('svg-grouping').value as SvgGrouping;
   if (format === 'glb' || format === 'obj') Object.assign(t, modelOpts());
+  if (format === 'sheet' || format === 'gif') Object.assign(t, { size: animOut.size, fps: animOut.fps, view: animOut.view === 'camera' ? 'angle' : animOut.view, layout: animOut.layout });
   state.autoExport.targets.push(t);
   autoExportChanged();
 }
@@ -2413,6 +2572,7 @@ autoHost.addEventListener('change', (e) => {
   if (!t) return;
   const key = el.dataset.key!;
   if (key === 'size') t.size = Math.max(1, Math.min(4096, Math.round(+el.value || 64)));
+  else if (key === 'fps') t.fps = +el.value || 12;
   else if (key === 'crisp') t.crisp = (el as HTMLInputElement).checked;
   else (t as any)[key] = el.value;
   autoExportChanged();

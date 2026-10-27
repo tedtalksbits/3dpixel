@@ -8,16 +8,21 @@ import { exportSvg, exportPng, SvgGrouping } from './svgExport';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
 import { Part, flattenTiles } from './rig';
 import { Clip } from './anim';
+import { FrameView, renderClips } from './frames';
+import { SheetLayout, sheetFiles, gifOf, clipSlug } from './animExport';
 import { FileType, basename, dirname, relativePath, resolvePath, stripExt, writePath } from './platform';
 
-export type TargetFormat = 'glb' | 'obj' | 'png' | 'svg';
+export type TargetFormat = 'glb' | 'obj' | 'png' | 'svg' | 'sheet' | 'gif';
 
 export interface ExportTarget {
   format: TargetFormat;
   /** Relative to the .kenshape's folder (forward slashes), or absolute. */
   path: string;
-  size?: number; // png
+  size?: number; // png; frame size for sheet and gif
   crisp?: boolean; // png
+  fps?: number; // sheet, gif
+  view?: FrameView; // sheet, gif
+  layout?: SheetLayout; // sheet
   grouping?: SvgGrouping; // svg
   scale?: ModelScale; // glb, obj
   pivot?: ModelPivot; // glb, obj
@@ -35,6 +40,8 @@ export const FORMATS: Record<TargetFormat, FileType & { label: string }> = {
   obj: { label: 'OBJ', description: 'Wavefront OBJ', ext: 'obj', mime: 'text/plain' },
   png: { label: 'PNG', description: 'PNG image', ext: 'png', mime: 'image/png' },
   svg: { label: 'SVG', description: 'SVG image', ext: 'svg', mime: 'image/svg+xml' },
+  sheet: { label: 'Sheet', description: 'Sprite sheet (PNG + JSON)', ext: 'png', mime: 'image/png' },
+  gif: { label: 'GIF', description: 'Animated GIF', ext: 'gif', mime: 'image/gif' },
 };
 
 export const emptyAutoExport = (): AutoExport => ({ enabled: true, targets: [] });
@@ -78,6 +85,20 @@ async function render(p: Project, rig: Part[], clips: Clip[], t: ExportTarget, a
     }
     case 'svg':
       return [[abs, exportSvg(flat, { grouping: t.grouping ?? 'shape', width: p.size.x * 16, height: p.size.y * 16 })]];
+    case 'sheet':
+    case 'gif': {
+      const animated = clips.filter((c) => c.tracks.length);
+      if (!animated.length) throw new Error('no animation clips to render');
+      const frames = renderClips(p, rig, animated, { size: t.size ?? 128, fps: t.fps ?? 12, view: t.view ?? 'front', smooth: true, background: null });
+      if (t.format === 'sheet') {
+        // the JSON sits beside the PNG and names it
+        const { png, json } = await sheetFiles(frames, t.layout ?? 'rows', stripExt(basename(abs)));
+        return [[abs, png], [stripExt(abs) + '.json', json]];
+      }
+      // one GIF per clip; a single clip keeps the target's own name
+      if (frames.length === 1) return [[abs, new Blob([gifOf(frames[0]) as Uint8Array<ArrayBuffer>])]];
+      return frames.map((f): [string, Blob] => [`${stripExt(abs)}-${clipSlug(f.clip.name)}.gif`, new Blob([gifOf(f) as Uint8Array<ArrayBuffer>])]);
+    }
   }
 }
 

@@ -358,3 +358,9 @@ button.icon.small { padding: 1px 6px; font-size: 13px; }
 /* pose mode */
 .overlay-btn.left { right: auto; left: 10px; }
 .overlay-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* animation export */
+.btn-grid.three { grid-template-columns: repeat(3, 1fr); }
+#anim-export .row label.inline { flex-direction: row; align-items: center; gap: 4px; margin: 0; }
+#anim-export .row label.inline input[type='number'] { width: 64px; }
+#anim-export .row label.inline select { width: auto; }

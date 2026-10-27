@@ -343,7 +343,8 @@ Code impact:
    - Biped walk, run and idle, quadruped gaits, and shell retract. **The human and the turtle work
      here.**
 5. **Custom keyframing** (done): dope sheet, pose-to-key, per-key easing, curve editor, onion skin.
-6. **Extras:** sprite sheet and GIF export, more templates (flyer, chain), clip blending previews.
+6. **Extras:** sprite sheet, PNG frame and GIF export (done). Still to do: more templates (flyer,
+   chain) and clip blending previews.
 
 ---
 
