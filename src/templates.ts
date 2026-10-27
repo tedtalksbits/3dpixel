@@ -5,7 +5,8 @@
 import type { Part } from './rig';
 
 export type TemplateKind = 'biped' | 'quadruped' | 'shell';
-export type Facing = 'right' | 'left';
+/** Which way a side-view creature faces, or 'front' for one drawn facing the viewer. */
+export type Facing = 'right' | 'left' | 'front';
 
 export interface RigTemplate {
   kind: TemplateKind | null;
@@ -58,17 +59,24 @@ export const roleLabel = (kind: TemplateKind | null, role: string) => (kind && T
 
 /** What creature presets read from the rig. */
 export interface RigCtx {
-  /** +1 when the creature faces right (+X), -1 when it faces left. */
+  /** +1 when the creature faces right (+X), -1 when it faces left or the viewer. */
   facing: 1 | -1;
+  /**
+   * The axis limbs swing about: Z for a side view, X for a creature facing the viewer, so its legs
+   * step towards the camera. Front-facing uses facing -1, which makes the presets' forward swing
+   * a negative turn about X: feet towards the camera.
+   */
+  axis: 0 | 2;
   part: (role: string) => string | undefined;
   pivot: (partId: string) => [number, number];
 }
 
-export const emptyCtx: RigCtx = { facing: 1, part: () => undefined, pivot: () => [0, 0] };
+export const emptyCtx: RigCtx = { facing: 1, axis: 2, part: () => undefined, pivot: () => [0, 0] };
 
 export function rigCtx(parts: Part[], tpl: RigTemplate): RigCtx {
   return {
-    facing: tpl.facing === 'left' ? -1 : 1,
+    facing: tpl.facing === 'right' ? 1 : -1,
+    axis: tpl.facing === 'front' ? 0 : 2,
     part: (role) => parts.find((p) => p.role === role)?.id,
     pivot: (id) => parts.find((p) => p.id === id)?.pivot ?? [0, 0],
   };

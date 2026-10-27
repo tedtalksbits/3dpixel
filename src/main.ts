@@ -4,12 +4,15 @@ import { SHAPES } from './shapes';
 import { TILE, exportSvg, exportPng, tilePath, SvgGrouping } from './svgExport';
 import { importSvg, PaletteMode } from './svgImport';
 import { importPng, PngDepth } from './pngImport';
+import { generateImage, estimateSkeleton, getBalance, balanceText, usageText, KEY_NAME, Model, View, Direction, Outline, Detail } from './pixellab';
+import { autoRig } from './autoRig';
+import { getSecret } from './secrets';
 import { Preview3D } from './preview3d';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
 import { tileDepths } from './mesh';
 import { transformShape, ShapeXf } from './transform';
 import { openColorPicker, hexToRgb, rgbToHex } from './colorPicker';
-import { settings, onSettingsChange, openSettings } from './settings';
+import { settings, onSettingsChange, openSettings, KEY_EVENT } from './settings';
 import * as platform from './platform';
 import { FileRef, FileType } from './platform';
 import {
@@ -1252,7 +1255,8 @@ function applyGuess(kind: TemplateKind) {
   const { roles, facing } = guessRoles(kind, state.parts);
   for (const pt of state.parts) delete pt.role;
   for (const [id, role] of roles) partById(id)!.role = role;
-  state.template.facing = facing;
+  // names and pivots can't tell a front view apart, so keep that choice
+  if (!(state.template.facing === 'front' && kind === 'biped')) state.template.facing = facing;
   return roles.size;
 }
 
@@ -1263,10 +1267,12 @@ function renderTemplate() {
     .map((k) => `<option value="${k}"${k === tpl.kind ? ' selected' : ''}>${TEMPLATES[k].name}</option>`)
     .join('');
   let html = `<h3>Rig template</h3>
-    <label>Kind <select id="tpl-kind"><option value="">None: single-part presets only</option>${kinds}</select></label>`;
+    <label>Kind <select id="tpl-kind"><option value="">None: single-part presets only</option>${kinds}</select></label>
+    <button id="tpl-autorig" class="wide" title="PixelLab finds the character's joints (0.1 generations); the drawing is split into body, head, arms and legs with pivots on the joints">Auto-rig a two-legged character</button>`;
   if (tpl.kind) {
     const t = TEMPLATES[tpl.kind];
-    const facing = (['right', 'left'] as Facing[]).map((f) => `<option value="${f}"${f === tpl.facing ? ' selected' : ''}>${f === 'right' ? 'Right →' : '← Left'}</option>`).join('');
+    const facings: Facing[] = tpl.kind === 'biped' ? ['right', 'left', 'front'] : ['right', 'left'];
+    const facing = facings.map((f) => `<option value="${f}"${f === tpl.facing ? ' selected' : ''}>${{ right: 'Right →', left: '← Left', front: 'Front: towards you' }[f]}</option>`).join('');
     const rows = t.roles
       .map(([role, label]) => {
         const opts = state.parts.map((pt) => `<option value="${pt.id}"${pt.role === role ? ' selected' : ''}>${escapeHtml(pt.name)}</option>`).join('');
@@ -1320,6 +1326,8 @@ partsPanel.addEventListener('click', (e) => {
     }
     case 'part-wiggle':
       return testJoint();
+    case 'tpl-autorig':
+      return autoRigClicked();
     case 'tpl-guess': {
       if (!state.template.kind) return;
       checkpoint();
@@ -2434,7 +2442,7 @@ async function doImportSvg(text: string, name: string) {
 
 const isImage = (name: string) => /\.(png|gif|webp|bmp)$/i.test(name);
 
-async function doImportPng(blob: Blob, name: string) {
+async function doImportPng(blob: Blob, name: string, quiet = false) {
   const colors = $<HTMLSelectElement>('png-colors').value;
   const size = $<HTMLSelectElement>('png-size').value;
   const res = await importPng(blob, {
@@ -2447,8 +2455,134 @@ async function doImportPng(blob: Blob, name: string) {
     thickness: $<HTMLInputElement>('png-thickness').value.trim() ? clampDepth(+$<HTMLInputElement>('png-thickness').value || 1) : 'auto',
   });
   res.project.title = name.replace(/\.[^.]+$/, '');
-  showImported(res.project, res.notes);
+  showImported(res.project, quiet ? [] : res.notes);
+  return res;
 }
+
+// ---------- PixelLab: generate and auto-rig ----------
+
+const genStatus = (msg: string, error = false) => {
+  const el = $('gen-status');
+  el.textContent = msg;
+  el.classList.toggle('error', error);
+};
+
+/** Show the balance, or how to add a key, under the Generate button. */
+async function refreshPixelLab() {
+  const key = await getSecret(KEY_NAME).catch(() => null);
+  $<HTMLButtonElement>('btn-generate').disabled = !key;
+  if (!key) {
+    $('gen-status').innerHTML = `Add your PixelLab API key in <button class="link" id="gen-settings">Settings</button> to generate sprites.`;
+    return;
+  }
+  genStatus('');
+  getBalance().then((b) => genStatus(balanceText(b)), (err) => genStatus(err.message, true));
+}
+
+/** "stone golem with glowing blue crystals" -> "stone-golem-glowing" */
+const promptName = (prompt: string) =>
+  prompt.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && !['a', 'an', 'the', 'with', 'and', 'of'].includes(w)).slice(0, 3).join('-') || 'generated';
+
+async function generate() {
+  const prompt = $<HTMLTextAreaElement>('gen-prompt').value.trim();
+  if (!prompt) return genStatus('Describe what to generate first.', true);
+  if (!(await discardOk())) return;
+  const btn = $<HTMLButtonElement>('btn-generate');
+  const model = $<HTMLSelectElement>('gen-model').value as Model;
+  const size = +$<HTMLSelectElement>('gen-size').value;
+  btn.disabled = true;
+  genStatus('Generating… (about 10–30 seconds)');
+  try {
+    const usePalette = model === 'pixflux' && $<HTMLInputElement>('gen-palette').checked;
+    const { image, usage } = await generateImage({
+      model,
+      description: prompt,
+      width: size,
+      height: size,
+      view: $<HTMLSelectElement>('gen-view').value as View,
+      direction: $<HTMLSelectElement>('gen-direction').value as Direction,
+      outline: $<HTMLSelectElement>('gen-outline').value as Outline,
+      detail: $<HTMLSelectElement>('gen-detail').value as Detail,
+      palette: usePalette ? paletteImage(state.project.colors) : undefined,
+    });
+    const imported = await doImportPng(image, promptName(prompt), true);
+    const notes = [`Generated for ${usageText(usage)}.`, ...imported.notes];
+    if ($<HTMLInputElement>('gen-rig').checked) {
+      genStatus('Finding the skeleton…');
+      notes.push(...(await rigFromSkeleton()));
+    }
+    flash(notes.join(' '));
+    genStatus(notes[0]);
+    getBalance().then((b) => genStatus(`${notes[0]} ${balanceText(b)}.`), () => {});
+  } catch (err: any) {
+    genStatus(err?.message ?? String(err), true);
+    flash(`Generate failed: ${err?.message ?? err}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** A strip of the palette's colours, as Pixflux's colour reference. */
+function paletteImage(colors: string[]): Blob {
+  const c = document.createElement('canvas');
+  c.width = colors.length;
+  c.height = 1;
+  const g = c.getContext('2d')!;
+  colors.forEach((hex, i) => ((g.fillStyle = hex), g.fillRect(i, 0, 1, 1)));
+  const raw = atob(c.toDataURL('image/png').split(',')[1]);
+  return new Blob([Uint8Array.from(raw, (ch) => ch.charCodeAt(0))], { type: 'image/png' });
+}
+
+/**
+ * Ask PixelLab for the drawing's skeleton and split it into biped parts. The whole drawing is
+ * sent (every part flattened), so it also re-rigs a model that already has parts.
+ */
+async function rigFromSkeleton(): Promise<string[]> {
+  commitFloat();
+  const p = state.project;
+  const flat = flattenTiles(p, state.parts);
+  if (!flat.some((t) => t.color >= 0)) throw new Error('Draw or import a character first.');
+  // the skeleton model takes up to 256×256; keypoints come back as fractions of what we send
+  const side = Math.max(p.size.x, p.size.y);
+  const scale = side > 256 ? 256 / side : Math.floor(256 / side);
+  const png = await exportPng({ ...p, tiles: flat }, Math.max(1, Math.round(p.size.x * scale)), Math.max(1, Math.round(p.size.y * scale)));
+  const { keypoints, usage } = await estimateSkeleton(png);
+  const res = autoRig(p, flat, keypoints);
+  checkpoint();
+  if (state.playing) stop();
+  state.parts = res.parts;
+  state.active = Math.max(0, res.parts.findIndex((pt) => pt.id === 'body'));
+  p.tiles = state.parts[state.active].tiles;
+  state.template = res.template;
+  state.sel.clear();
+  renderAll();
+  return [...res.notes, `Skeleton: ${usageText(usage)}. Pick Walk, Run or Idle under Animation.`];
+}
+
+async function autoRigClicked() {
+  const btn = document.getElementById('tpl-autorig') as HTMLButtonElement | null;
+  if (btn) btn.disabled = true;
+  flash('Finding the skeleton with PixelLab…');
+  try {
+    flash((await rigFromSkeleton()).join(' '));
+  } catch (err: any) {
+    flash(`Auto-rig failed: ${err?.message ?? err}`, true);
+    renderAll();
+  }
+}
+
+$('btn-generate').addEventListener('click', generate);
+$('gen-prompt').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generate();
+});
+$('gen-status').addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).id === 'gen-settings') openSettings();
+});
+const syncGenPalette = () => ($<HTMLInputElement>('gen-palette').disabled = $<HTMLSelectElement>('gen-model').value !== 'pixflux');
+$('gen-model').addEventListener('change', syncGenPalette);
+syncGenPalette();
+window.addEventListener(KEY_EVENT, refreshPixelLab);
+refreshPixelLab();
 
 /** Replace the project with an imported one, keeping the old one a step back in undo. */
 function showImported(p: Project, notes: string[]) {

@@ -144,11 +144,13 @@ other browsers download a copy instead.
   - Each preset card has pivot buttons (centre or an edge), with the usual spot for that motion
     highlighted.
   - **Customise**, or editing a preset's values by hand, turns the preset into plain keys.
-- **Creature templates and presets** (side view):
+- **Creature templates and presets** (side view, plus a front view for bipeds):
   - In Parts, pick a **rig template**: Biped, Four-legged or Shell creature. It lists the template's
     roles (body, head, near and far arms and legs, tail), and "Guess roles" fills them in from part
     names ("head", "arm", "far"...), Z and pivots. It also sets which way the creature faces from
     where its head is. Fix any role with its menu.
+  - A biped can also face **front**, towards you: then legs and arms swing about X, so the
+    feet step towards the camera, instead of about Z as in a side view.
   - **Biped:** Walk, Run, Idle. Legs and arms swing in opposition, the body bobs twice per cycle,
     and the head lags. Run adds a forward lean.
   - **Four-legged:** Walk, Trot, Pace, Canter, Gallop, Idle. Each gait uses the real footfall order:
@@ -197,6 +199,21 @@ other browsers download a copy instead.
     clip. Framing is fitted once over every frame, so the sprite doesn't jitter.
   - Export on save can also write sprite sheets and GIFs, so your game's sprites update every
     time you save.
+- **Generate sprites and auto-rig them with [PixelLab](https://www.pixellab.ai)** (needs a PixelLab
+  API key, added in Settings):
+  - **Generate:** describe a sprite, choose the model (Pixen, or Pixflux, which can match your
+    palette), size, facing, view, outline and detail. The sprite comes back on a transparent
+    background and goes through PNG import, so it arrives as a 3D model with rounded depth.
+  - **Auto-rig a two-legged character** (Parts, under Rig template, or a checkbox when
+    generating): PixelLab finds the character's 18 joints (0.1 generations). The drawing is split
+    into body, head, two arms and two legs: each tile goes to the nearest bone, shoulder pads go
+    with the arm, and stray bits join the part they touch most. Pivots go on the neck, shoulders
+    and hips. The Biped template is set up with roles and facing (front for a character facing
+    you, near and far limbs from the joints' draw order for a side view), so Walk, Run and Idle
+    work straight away. It works on any drawing, not only generated ones, and Undo reverts it.
+  - **The key** is kept in the system keychain in the desktop app (Windows Credential Manager,
+    macOS Keychain), and in this browser's local storage on the web. It is only sent to
+    api.pixellab.ai. Settings shows the masked key and your remaining balance.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -270,6 +287,9 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/presets.ts`: animation presets that generate keyframe tracks
 - `src/templates.ts`: rig templates, roles and role guessing
 - `src/creatures.ts`: biped, four-legged and shell creature presets
+- `src/pixellab.ts`: PixelLab API client: image generation, skeleton estimation, balance
+- `src/autoRig.ts`: splits a drawing into biped parts from a skeleton
+- `src/secrets.ts`: API key storage (system keychain on desktop, localStorage on the web)
 - `src/dopesheet.ts`: the dope sheet
 - `src/curveEditor.ts`: the ease curve editor
 - `src/frames.ts`: renders clips to image frames
@@ -277,5 +297,5 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/gif.ts`: animated GIF encoder
 - `src/zip.ts`: ZIP writer for PNG frames
 - `src/main.ts`: editor UI, tools and selection
-- `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
+- `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, keychain access, config and icons
 - `docs/kenshape-format.md`: file format notes

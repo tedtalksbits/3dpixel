@@ -50,7 +50,6 @@ const wave = (phase: number, amp: number, center = 0): Point[] => [
   [phase + 0.5, center - amp, 'sine.inOut'],
 ];
 
-const Z = 2;
 const Y = 1;
 
 // ---------- bipeds ----------
@@ -61,18 +60,18 @@ function bipedGait(p: Params, d: number, ctx: RigCtx, duty: number): Gen[] {
   const arms = num(p.arms);
   const bounce = num(p.bounce);
   const out: Gen[] = [
-    ...track(ctx, 'leg.near', 'rotation', Z, d, 1, leg(0, duty, s * stride)),
-    ...track(ctx, 'leg.far', 'rotation', Z, d, 1, leg(0.5, duty, s * stride)),
+    ...track(ctx, 'leg.near', 'rotation', ctx.axis, d, 1, leg(0, duty, s * stride)),
+    ...track(ctx, 'leg.far', 'rotation', ctx.axis, d, 1, leg(0.5, duty, s * stride)),
     // arms swing against the legs on the same side
-    ...track(ctx, 'arm.near', 'rotation', Z, d, 1, wave(0.5, s * arms)),
-    ...track(ctx, 'arm.far', 'rotation', Z, d, 1, wave(0, s * arms)),
+    ...track(ctx, 'arm.near', 'rotation', ctx.axis, d, 1, wave(0.5, s * arms)),
+    ...track(ctx, 'arm.far', 'rotation', ctx.axis, d, 1, wave(0, s * arms)),
     // the body is lowest just after each contact and highest as the legs pass
     ...track(ctx, 'body', 'position', Y, d, 2, wave(0.5, bounce / 2, bounce / 2)),
     // the head lags the body a little, which keeps it from looking stiff
-    ...track(ctx, 'head', 'rotation', Z, d, 2, wave(0.1, -s * num(p.head))),
-    ...track(ctx, 'tail', 'rotation', Z, d, 1, wave(0.25, 8)),
+    ...track(ctx, 'head', 'rotation', ctx.axis, d, 2, wave(0.1, -s * num(p.head))),
+    ...track(ctx, 'tail', 'rotation', ctx.axis, d, 1, wave(0.25, 8)),
   ];
-  if (num(p.lean)) out.push(...track(ctx, 'body', 'rotation', Z, d, 1, [[0, -s * num(p.lean), 'linear']]));
+  if (num(p.lean)) out.push(...track(ctx, 'body', 'rotation', ctx.axis, d, 1, [[0, -s * num(p.lean), 'linear']]));
   return out;
 }
 
@@ -108,14 +107,14 @@ function quadGait(gait: Gait, p: Params, d: number, ctx: RigCtx): Gen[] {
   const stride = s * num(p.stride);
   const bounce = num(p.bounce);
   const out: Gen[] = [];
-  for (const [legName, ph] of Object.entries(gait.phase)) out.push(...track(ctx, `leg.${legName}`, 'rotation', Z, d, 1, leg(ph, gait.duty, stride)));
+  for (const [legName, ph] of Object.entries(gait.phase)) out.push(...track(ctx, `leg.${legName}`, 'rotation', ctx.axis, d, 1, leg(ph, gait.duty, stride)));
   out.push(
     ...track(ctx, 'body', 'position', Y, d, gait.bobs, wave(0.5, bounce / 2, bounce / 2)),
-    ...track(ctx, 'head', 'rotation', Z, d, gait.bobs, wave(0.1, -s * num(p.head))),
-    ...track(ctx, 'tail', 'rotation', Z, d, 1, wave(0.25, num(p.tail))),
+    ...track(ctx, 'head', 'rotation', ctx.axis, d, gait.bobs, wave(0.1, -s * num(p.head))),
+    ...track(ctx, 'tail', 'rotation', ctx.axis, d, 1, wave(0.25, num(p.tail))),
   );
   // canter and gallop rock the body: nose up as the back legs push, down as the front legs land
-  if (num(p.rock)) out.push(...track(ctx, 'body', 'rotation', Z, d, 1, wave(0.2, s * num(p.rock))));
+  if (num(p.rock)) out.push(...track(ctx, 'body', 'rotation', ctx.axis, d, 1, wave(0.2, s * num(p.rock))));
   return out;
 }
 
@@ -276,10 +275,10 @@ export const CREATURE_PRESETS: PresetDef[] = [
     loops: () => true,
     generate: (p, d, ctx) => [
       ...track(ctx, 'body', 'scale', Y, d, 1, wave(0.5, num(p.breath) / 2, 1 + num(p.breath) / 2)),
-      ...track(ctx, 'head', 'rotation', Z, d, 1, wave(0.6, -ctx.facing * num(p.head))),
-      ...track(ctx, 'arm.near', 'rotation', Z, d, 1, wave(0.5, ctx.facing * num(p.arms))),
-      ...track(ctx, 'arm.far', 'rotation', Z, d, 1, wave(0.6, ctx.facing * num(p.arms))),
-      ...track(ctx, 'tail', 'rotation', Z, d, 1, wave(0.25, 6)),
+      ...track(ctx, 'head', 'rotation', ctx.axis, d, 1, wave(0.6, -ctx.facing * num(p.head))),
+      ...track(ctx, 'arm.near', 'rotation', ctx.axis, d, 1, wave(0.5, ctx.facing * num(p.arms))),
+      ...track(ctx, 'arm.far', 'rotation', ctx.axis, d, 1, wave(0.6, ctx.facing * num(p.arms))),
+      ...track(ctx, 'tail', 'rotation', ctx.axis, d, 1, wave(0.25, 6)),
     ],
   },
   gaitPreset('quad.walk', 'Walk', '🐕', 'Four-beat walk: back, front, back, front, so two or three feet are always down.', 1.1, GAITS.walk, quadParams(22, 0.15, 4, 10, 0)),
@@ -305,8 +304,8 @@ export const CREATURE_PRESETS: PresetDef[] = [
     loops: () => true,
     generate: (p, d, ctx) => [
       ...track(ctx, 'body', 'scale', Y, d, 1, wave(0.5, num(p.breath) / 2, 1 + num(p.breath) / 2)),
-      ...track(ctx, 'head', 'rotation', Z, d, 1, wave(0.6, -ctx.facing * num(p.head))),
-      ...track(ctx, 'tail', 'rotation', Z, d, 2, wave(0, num(p.tail))),
+      ...track(ctx, 'head', 'rotation', ctx.axis, d, 1, wave(0.6, -ctx.facing * num(p.head))),
+      ...track(ctx, 'tail', 'rotation', ctx.axis, d, 2, wave(0, num(p.tail))),
     ],
   },
   {

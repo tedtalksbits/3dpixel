@@ -153,7 +153,7 @@ export function takeRig(p: Project): { parts: Part[]; active: number; clips: Cli
   const kind = raw.template?.kind;
   const template: RigTemplate = {
     kind: kind && kind in TEMPLATES ? (kind as TemplateKind) : null,
-    facing: raw.template?.facing === 'left' ? 'left' : 'right',
+    facing: raw.template?.facing === 'left' || raw.template?.facing === 'front' ? raw.template.facing : 'right',
   };
   return { parts, active, clips, template };
 }

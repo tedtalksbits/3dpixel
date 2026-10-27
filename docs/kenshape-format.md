@@ -161,7 +161,8 @@ Other tools can ignore `presets` and just play the tracks.
 
 ### Templates and roles
 
-`rig.template` is `{ "kind": "biped" | "quadruped" | "shell", "facing": "right" | "left" }`, and a
+`rig.template` is `{ "kind": "biped" | "quadruped" | "shell", "facing": "right" | "left" | "front" }`
+("front" is for a biped facing the viewer: its limbs swing about X instead of Z), and a
 part can have a `"role"`, such as `body`, `head`, `arm.near`, `arm.far`, `leg.near`, `leg.far`,
 `leg.front.near`, `leg.front.far`, `leg.back.near`, `leg.back.far` or `tail`. Creature presets
 (`biped.walk`, `quad.trot`, `shell.retract`, ...) are applied to the body part and generate tracks for

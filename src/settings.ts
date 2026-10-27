@@ -1,4 +1,6 @@
 import { openColorPicker, closeColorPicker } from './colorPicker';
+import { getSecret, setSecret, secretStore } from './secrets';
+import { KEY_NAME, KEY_URL, getBalance, balanceText } from './pixellab';
 
 // Per-browser preferences. Stored in localStorage; the app still works if storage is blocked.
 
@@ -115,7 +117,28 @@ const SECTIONS: { title: string; fields: Field[] }[] = [
   },
 ];
 
-export function openSettings() {
+// ---------- PixelLab key ----------
+
+/** Fired on window when the PixelLab key is saved or removed. */
+export const KEY_EVENT = 'pixellab-key';
+
+function pixelLabSection(key: string | null) {
+  const masked = key ? `•••• ${key.slice(-4)}` : '';
+  return `<section><h2>PixelLab</h2>
+    <p class="hint">An API key lets you generate sprites and auto-rig characters with <a href="${KEY_URL}" target="_blank" rel="noopener">PixelLab</a>. It is kept in ${secretStore} and sent only to api.pixellab.ai.</p>
+    ${
+      key
+        ? `<div class="setting"><span>API key</span><span class="control"><span class="mono">${masked}</span><button data-act="pl-check">Check balance</button><button data-act="pl-remove">Remove</button></span></div>`
+        : `<div class="setting"><span>API key</span><span class="control"><input type="password" id="pl-key" placeholder="Paste your key" autocomplete="off" spellcheck="false" /><button data-act="pl-save">Save</button></span></div>`
+    }
+    <p class="hint" id="pl-status"></p></section>`;
+}
+
+export async function openSettings() {
+  let key: string | null = null;
+  try {
+    key = await getSecret(KEY_NAME);
+  } catch {}
   let dlg = document.getElementById('settings-dialog') as HTMLDialogElement | null;
   if (!dlg) {
     dlg = document.createElement('dialog');
@@ -146,6 +169,7 @@ export function openSettings() {
             })
             .join('')}</section>`,
         ).join('')}
+        ${pixelLabSection(key)}
       </div>
       <footer><button data-act="reset">Reset to defaults</button><button data-act="close" class="primary">Done</button></footer>`;
   };
@@ -155,6 +179,36 @@ export function openSettings() {
     const t = e.target as HTMLElement;
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'close') dlg!.close();
+    const status = (msg: string) => {
+      const el = dlg!.querySelector('#pl-status');
+      if (el) el.textContent = msg;
+    };
+    if (act === 'pl-save') {
+      const v = (dlg!.querySelector('#pl-key') as HTMLInputElement).value.trim();
+      if (!v) return status('Paste your key first.');
+      setSecret(KEY_NAME, v).then(
+        async () => {
+          key = v;
+          window.dispatchEvent(new Event(KEY_EVENT));
+          render();
+          status('Saved. Checking it…');
+          getBalance().then((b) => status(`Key works: ${balanceText(b)}.`), (err) => status(err.message));
+        },
+        (err) => status(String(err?.message ?? err)),
+      );
+    }
+    if (act === 'pl-check') {
+      status('Checking…');
+      getBalance().then((b) => status(balanceText(b)), (err) => status(err.message));
+    }
+    if (act === 'pl-remove') {
+      setSecret(KEY_NAME, null).then(() => {
+        key = null;
+        window.dispatchEvent(new Event(KEY_EVENT));
+        render();
+        status('Key removed.');
+      }, (err) => status(String(err?.message ?? err)));
+    }
     if (act === 'reset' && confirm('Reset all settings to their defaults?')) {
       updateSettings({ ...DEFAULTS });
       render();
@@ -169,6 +223,9 @@ export function openSettings() {
         },
       });
     }
+  };
+  dlg.onkeydown = (e) => {
+    if (e.key === 'Enter' && (e.target as HTMLElement).id === 'pl-key') (dlg!.querySelector('[data-act=pl-save]') as HTMLElement).click();
   };
   dlg.oninput = (e) => {
     const t = e.target as HTMLInputElement | HTMLSelectElement;

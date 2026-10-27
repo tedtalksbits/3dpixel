@@ -200,6 +200,68 @@
           <div id="auto-export" class="auto-export"></div>
         </section>
         <section>
+          <h2>Generate with PixelLab</h2>
+          <textarea id="gen-prompt" rows="2" placeholder="Describe a sprite, e.g. stone golem with glowing blue crystals"></textarea>
+          <div class="row tight-top">
+            <label class="inline">Model
+              <select id="gen-model" title="Pixen is PixelLab's newest model. Pixflux can match your palette.">
+                <option value="pixen" selected>Pixen</option>
+                <option value="pixflux">Pixflux</option>
+              </select>
+            </label>
+            <label class="inline">Size
+              <select id="gen-size">
+                <option value="32">32</option>
+                <option value="48">48</option>
+                <option value="64" selected>64</option>
+                <option value="96">96</option>
+                <option value="128">128</option>
+              </select>
+            </label>
+          </div>
+          <div class="row tight-top">
+            <label class="inline">Faces
+              <select id="gen-direction">
+                <option value="south" selected>Towards you</option>
+                <option value="east">Right</option>
+                <option value="west">Left</option>
+                <option value="south-east">¾ right</option>
+                <option value="south-west">¾ left</option>
+                <option value="north">Away</option>
+              </select>
+            </label>
+            <label class="inline">View
+              <select id="gen-view">
+                <option value="side" selected>Side</option>
+                <option value="low top-down">Low top-down</option>
+                <option value="high top-down">High top-down</option>
+              </select>
+            </label>
+          </div>
+          <div class="row tight-top">
+            <label class="inline">Outline
+              <select id="gen-outline">
+                <option value="single color black outline" selected>Black</option>
+                <option value="single color outline">Coloured</option>
+                <option value="selective outline">Selective</option>
+                <option value="lineless">None</option>
+              </select>
+            </label>
+            <label class="inline">Detail
+              <select id="gen-detail">
+                <option value="low detail">Low</option>
+                <option value="medium detail" selected>Medium</option>
+                <option value="highly detailed">High</option>
+              </select>
+            </label>
+          </div>
+          <label class="check" title="Pixflux only: generate with the current palette's colours"><input type="checkbox" id="gen-palette" /> Use the current palette</label>
+          <label class="check" title="Find the skeleton and split the sprite into body, head, arms and legs, ready for the biped presets"><input type="checkbox" id="gen-rig" /> Auto-rig as a two-legged character</label>
+          <button id="btn-generate" class="wide primary">Generate</button>
+          <p class="hint" id="gen-status"></p>
+          <p class="hint">The sprite comes in through PNG import, so its depth and colours follow the settings there.</p>
+        </section>
+        <section>
           <h2>SVG import</h2>
           <label>Palette
             <select id="import-palette">
