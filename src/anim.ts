@@ -55,13 +55,21 @@ const lerp = (a: Vec3, b: Vec3, k: number): Vec3 => [a[0] + (b[0] - a[0]) * k, a
 
 /**
  * Value of a track at time t. Before the first key and after the last it holds, except in a
- * looping clip, where the gap after the last key eases back into the first key at the loop point,
- * so loops are seamless without a duplicate end key.
+ * looping clip, where the gap across the loop point eases from the last key into the first, so
+ * loops are seamless without a duplicate end key, and cycles can start part-way through.
  */
 export function sampleTrack(track: Track, t: number, clip: Clip): Vec3 {
   const keys = track.keys;
   if (!keys.length) return [...REST[track.prop]];
-  if (t <= keys[0].t) return [...keys[0].v];
+  if (t < keys[0].t) {
+    const last = keys[keys.length - 1];
+    if (clip.loop && keys.length > 1 && last.t < clip.duration) {
+      const span = clip.duration - last.t + keys[0].t;
+      return lerp(last.v, keys[0].v, ease(last.ease, (t + clip.duration - last.t) / span));
+    }
+    return [...keys[0].v];
+  }
+  if (t === keys[0].t) return [...keys[0].v];
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i];
     const b = keys[i + 1];

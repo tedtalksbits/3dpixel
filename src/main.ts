@@ -16,8 +16,9 @@ import {
 } from './autoExport';
 import { Clip, Prop, Vec3, FPS, REST, newClip, evalClip, setKey, snapTime, keyTimes, keysAt, deleteKeysAt, findTrack } from './anim';
 import { Ease, EASE_OPTIONS } from './easing';
-import { PRESETS, PRESET_LIST, PresetId, PresetUse, PivotSpot, addPreset, applyPreset, removePreset, customisePreset, refreshPresets } from './presets';
-import { Part, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
+import { PRESETS, PRESET_LIST, PresetDef, PresetId, PresetUse, PivotSpot, addPreset, applyPreset, removePreset, customisePreset, refreshPresets, presetsFor } from './presets';
+import { RigTemplate, TemplateKind, Facing, TEMPLATES, rigCtx, guessRoles, roleLabel } from './templates';
+import { Part, noTemplate, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
 
 type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
 type DepthMode = 'set' | 'raise' | 'lower';
@@ -47,6 +48,7 @@ interface Snapshot {
   active: number;
   clips: Clip[];
   clip: number;
+  template: RigTemplate;
   sel: number[];
 }
 
@@ -69,6 +71,7 @@ const state = {
   time: 0, // playhead, seconds
   playing: false,
   keyEase: 'cubic.inOut' as Ease,
+  template: noTemplate() as RigTemplate,
   tool: 'draw' as Tool,
   shape: 0,
   angle: 0,
@@ -96,7 +99,7 @@ const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < state.project
 
 // ---------- history ----------
 
-const snapshot = (): Snapshot => ({ project: cloneProject(state.project), parts: structuredClone(state.parts), active: state.active, clips: structuredClone(state.clips), clip: state.clip, sel: [...state.sel] });
+const snapshot = (): Snapshot => ({ project: cloneProject(state.project), parts: structuredClone(state.parts), active: state.active, clips: structuredClone(state.clips), clip: state.clip, template: { ...state.template }, sel: [...state.sel] });
 
 function checkpoint() {
   state.undo.push(snapshot());
@@ -112,6 +115,7 @@ function restore(s: Snapshot) {
   state.project.tiles = s.parts[s.active].tiles;
   state.clips = s.clips;
   state.clip = Math.min(s.clip, s.clips.length - 1);
+  state.template = s.template;
   state.sel = new Set(s.sel);
   state.float = null;
 }
@@ -143,6 +147,7 @@ function setProject(p: Project, file: FileRef | null = null) {
   if (state.playing) stop();
   state.clips = rig.clips;
   state.clip = rig.clips.length ? 0 : -1;
+  state.template = rig.template;
   state.time = 0;
   state.project = p;
   state.undo = [];
@@ -596,6 +601,7 @@ function setPivotAt(e: PointerEvent) {
   if (part.pivot[0] === px && part.pivot[1] === py) return;
   part.pivot = [px, py];
   state.dirty = true;
+  refreshAllPresets();
   renderCanvas();
   renderParts();
   schedule3d();
@@ -1208,6 +1214,7 @@ function renderParts() {
   $<HTMLButtonElement>('part-from-sel').disabled = !hasSelection();
   $<HTMLButtonElement>('part-delete').disabled = state.parts.length < 2;
   $<HTMLInputElement>('parts-dim').checked = state.dimOthers;
+  renderTemplate();
 
   const props = $('part-props');
   if (props.contains(document.activeElement) && document.activeElement?.matches('input')) return;
@@ -1225,6 +1232,41 @@ function renderParts() {
       <button id="part-pivot-auto" title="Put the pivot where this part touches its parent">Auto pivot</button>
     </div>
     <button id="part-wiggle" class="wide" title="Swing this part about its pivot in the 3D view">Test joint</button>`;
+}
+
+/** Give parts the roles guessed from their names and positions, and set the facing. */
+function applyGuess(kind: TemplateKind) {
+  const { roles, facing } = guessRoles(kind, state.parts);
+  for (const pt of state.parts) delete pt.role;
+  for (const [id, role] of roles) partById(id)!.role = role;
+  state.template.facing = facing;
+  return roles.size;
+}
+
+function renderTemplate() {
+  const host = $('rig-template');
+  const tpl = state.template;
+  const kinds = (Object.keys(TEMPLATES) as TemplateKind[])
+    .map((k) => `<option value="${k}"${k === tpl.kind ? ' selected' : ''}>${TEMPLATES[k].name}</option>`)
+    .join('');
+  let html = `<h3>Rig template</h3>
+    <label>Kind <select id="tpl-kind"><option value="">None: single-part presets only</option>${kinds}</select></label>`;
+  if (tpl.kind) {
+    const t = TEMPLATES[tpl.kind];
+    const facing = (['right', 'left'] as Facing[]).map((f) => `<option value="${f}"${f === tpl.facing ? ' selected' : ''}>${f === 'right' ? 'Right →' : '← Left'}</option>`).join('');
+    const rows = t.roles
+      .map(([role, label]) => {
+        const opts = state.parts.map((pt) => `<option value="${pt.id}"${pt.role === role ? ' selected' : ''}>${escapeHtml(pt.name)}</option>`).join('');
+        const set = state.parts.some((pt) => pt.role === role);
+        return `<label class="role-row${set ? '' : ' unset'}"><span>${label}</span><select data-role="${role}"><option value="">—</option>${opts}</select></label>`;
+      })
+      .join('');
+    html += `<label>Faces <select id="tpl-facing">${facing}</select></label>
+      <p class="hint">${t.help} Give each part its role; presets skip roles with no part.</p>
+      <div class="roles">${rows}</div>
+      <button id="tpl-guess" class="wide" title="Guess roles from part names (head, arm, leg, far...), Z and pivot positions">Guess roles</button>`;
+  }
+  host.innerHTML = html;
 }
 
 const partsPanel = $('parts-panel');
@@ -1265,11 +1307,42 @@ partsPanel.addEventListener('click', (e) => {
     }
     case 'part-wiggle':
       return testJoint();
+    case 'tpl-guess': {
+      if (!state.template.kind) return;
+      checkpoint();
+      const n = applyGuess(state.template.kind);
+      flash(`Guessed ${n} role${n === 1 ? '' : 's'}. Fix any that are wrong with the menus.`);
+      return renderAll();
+    }
   }
 });
 partsPanel.addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement;
   const pt = activePart();
+  if (el.id === 'tpl-kind') {
+    checkpoint();
+    const kind = (el.value || null) as TemplateKind | null;
+    state.template.kind = kind;
+    // roles from another template (or none yet): start from a guess
+    if (kind && !state.parts.some((o) => o.role && TEMPLATES[kind].roles.some(([r]) => r === o.role))) {
+      const n = applyGuess(kind);
+      flash(`Guessed ${n} role${n === 1 ? '' : 's'} from part names and positions. Check them below.`);
+    }
+    return renderAll();
+  }
+  if (el.id === 'tpl-facing') {
+    checkpoint();
+    state.template.facing = el.value as Facing;
+    return renderAll();
+  }
+  if (el.dataset.role) {
+    checkpoint();
+    const role = el.dataset.role;
+    for (const o of state.parts) if (o.role === role) delete o.role;
+    const target = partById(el.value || null);
+    if (target) target.role = role; // a part has one role, so this replaces any other
+    return renderAll();
+  }
   if (el.id === 'parts-dim') {
     state.dimOthers = el.checked;
     return renderCanvas();
@@ -1494,26 +1567,37 @@ function addPresetToClip(id: PresetId) {
   stop();
   checkpoint();
   let c = activeClip();
+  const base = def.name.toLowerCase(); // "walk", "spin", ...
   if (!c) {
-    state.clips.push((c = newClip(uniqueClipName(id))));
+    state.clips.push((c = newClip(uniqueClipName(base))));
     state.clip = state.clips.length - 1;
   }
   const fresh = !c.tracks.length;
   if (fresh) {
     c.duration = def.length;
     // an untouched default name takes the preset's name
-    if (/^(idle|clip\d+(_\d+)?)$/.test(c.name)) c.name = uniqueClipName(id);
+    if (/^(idle|clip\d+(_\d+)?)$/.test(c.name)) c.name = uniqueClipName(base);
   }
-  const part = activePart();
-  const use = addPreset(c, id, part.id);
+  const rig = ctx();
+  // creature presets belong to the whole rig and hang off its body (or root) part
+  const part = def.template ? partById(rig.part('body') ?? null) ?? state.parts.find((o) => !o.parent) ?? activePart() : activePart();
+  const use = addPreset(c, id, part.id, rig);
   if (fresh || c.presets!.length === 1) c.loop = def.loops(use.params);
   state.time = 0;
   renderAll();
   play();
+  if (def.template) {
+    const missing = (def.roles ?? []).filter((r) => !rig.part(r)).map((r) => roleLabel(def.template!, r).toLowerCase());
+    flash(`${TEMPLATES[def.template].name.replace(/ \(.*/, '')} ${def.name.toLowerCase()} added.${missing.length ? ` No part for: ${missing.join(', ')} (set roles in Parts).` : ''}`);
+    return;
+  }
   const at = pivotSpot(part, def.pivot);
   const off = part.pivot[0] !== at[0] || part.pivot[1] !== at[1];
   flash(`${def.name} added to ${part.name}.${off ? ` Its pivot usually goes at the ${def.pivotHint}: use the pivot buttons on the card.` : ''}`);
 }
+
+/** A slider's value with its unit, singular for exactly 1 ("1 tile"). */
+const paramText = (v: number | string, unit = '') => `${v}${+v === 1 ? unit.replace(/s$/, '') : unit}`;
 
 function presetCard(c: Clip, use: PresetUse) {
   const def = PRESETS[use.preset];
@@ -1534,10 +1618,23 @@ function presetCard(c: Clip, use: PresetUse) {
         return `<label>${p.label} <select data-use="${use.id}" data-param="${p.key}">${p.options!
           .map(([o, l]) => `<option value="${o}"${o === v ? ' selected' : ''}>${l}</option>`)
           .join('')}</select></label>`;
-      return `<label class="slider">${p.label} <span class="mono" data-val="${use.id}-${p.key}">${v}${p.unit ?? ''}</span>
+      return `<label class="slider">${p.label} <span class="mono" data-val="${use.id}-${p.key}">${paramText(v, p.unit)}</span>
         <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${v}" data-use="${use.id}" data-param="${p.key}" /></label>`;
     })
     .join('');
+  if (def.template) {
+    const rig = ctx();
+    const used = (def.roles ?? []).filter((r) => rig.part(r));
+    const missing = (def.roles ?? []).filter((r) => !rig.part(r));
+    const names = (roles: string[]) => roles.map((r) => escapeHtml(roleLabel(def.template!, r))).join(', ');
+    return `<div class="preset-card">
+    <div class="preset-head"><span class="preset-icon">${def.icon}</span><b>${def.name}</b><span class="hint">${escapeHtml(TEMPLATES[def.template].name.replace(/ \(.*/, ''))}</span>
+      <button class="small" data-use-custom="${use.id}" title="Turn into plain keys you can edit by hand">Customise</button>
+      <button class="icon small" data-use-remove="${use.id}" title="Remove this preset and its keys">×</button></div>
+    ${params}
+    <p class="hint">Moves ${names(used) || 'nothing yet'}.${missing.length ? ` No part for ${names(missing)}.` : ''} Check each joint's pivot with the Pivot tool.</p>
+  </div>`;
+  }
   return `<div class="preset-card">
     <div class="preset-head"><span class="preset-icon">${def.icon}</span><b>${def.name}</b><span class="hint">${escapeHtml(pt?.name ?? '?')}</span>
       <button class="small" data-use-custom="${use.id}" title="Turn into plain keys you can edit by hand">Customise</button>
@@ -1551,8 +1648,17 @@ function presetCard(c: Clip, use: PresetUse) {
   </div>`;
 }
 
-const presetButtons = () =>
-  `<div class="preset-grid">${PRESET_LIST.map((d) => `<button data-preset-add="${d.id}" title="${escapeHtml(d.help)}"><span class="preset-icon">${d.icon}</span>${d.name}</button>`).join('')}</div>`;
+const presetGrid = (list: PresetDef[]) =>
+  `<div class="preset-grid">${list.map((d) => `<button data-preset-add="${d.id}" title="${escapeHtml(d.help)}"><span class="preset-icon">${d.icon}</span>${d.name}</button>`).join('')}</div>`;
+
+/** Creature presets for the rig's template, then the single-part presets. */
+function presetButtons() {
+  const kind = state.template.kind;
+  const creature = kind
+    ? `<h3>${escapeHtml(TEMPLATES[kind].name.replace(/ \(.*/, ''))} <span class="hint">whole rig</span></h3>${presetGrid(presetsFor(kind))}`
+    : `<p class="hint">For walk, run and other creature motions, pick a rig template in Parts.</p>`;
+  return `${creature}<h3>${escapeHtml(activePart().name)} <span class="hint">this part</span></h3>${presetGrid(PRESET_LIST)}`;
+}
 
 /** While playing, update only the numbers: rebuilding the panel every frame would swallow clicks. */
 function refreshPoseFields() {
@@ -1596,7 +1702,6 @@ function renderPose() {
       <label class="inline">Length <input id="clip-duration" type="number" min="0.05" step="0.05" value="${round(c.duration, 3)}" /> s</label>
       <label class="check inline" title="Loops play seamlessly: after the last key the pose eases back into the first"><input id="clip-loop" type="checkbox"${c.loop ? ' checked' : ''} /> Loop</label>
     </div>
-    <h3>Presets for ${escapeHtml(part.name)}</h3>
     ${presetButtons()}
     ${(c.presets ?? []).map((u) => presetCard(c, u)).join('')}
     <h3><span id="pose-title">${escapeHtml(part.name)} at ${fmtTime(at)}</span>${keys.length ? ' <span class="badge">key</span>' : ''}</h3>
@@ -1697,10 +1802,10 @@ function setPresetParam(el: HTMLInputElement | HTMLSelectElement, live: boolean)
   const def = PRESETS[use.preset];
   const p = def.params.find((o) => o.key === el.dataset.param)!;
   use.params[p.key] = p.kind === 'range' ? +el.value : el.value;
-  applyPreset(c, use);
+  applyPreset(c, use, ctx());
   if (c.presets!.length === 1) c.loop = def.loops(use.params);
   const label = animHost.querySelector(`[data-val="${use.id}-${p.key}"]`);
-  if (label) label.textContent = `${use.params[p.key]}${p.unit ?? ''}`;
+  if (label) label.textContent = paramText(use.params[p.key], p.unit);
   if (!state.playing) play();
   preview3d.setPose(currentPose());
   renderPlaybar();
@@ -1738,7 +1843,7 @@ animHost.addEventListener('change', (e) => {
   if (el.id === 'clip-name') c.name = el.value.trim().replace(/\s+/g, '_') || c.name;
   else if (el.id === 'clip-duration') {
     c.duration = Math.max(1 / FPS, round(+el.value || c.duration, 3));
-    refreshPresets(c); // presets stretch to the new length
+    refreshPresets(c, ctx()); // presets stretch to the new length
   }
   else if (el.id === 'clip-loop') c.loop = el.checked;
   el.blur();
@@ -1858,7 +1963,16 @@ $('btn-export-model').addEventListener('click', async () => {
   renderAll();
 });
 
+const ctx = () => rigCtx(state.parts, state.template);
+
+/** Live presets depend on roles, facing and pivots, so rebuild them whenever those may have changed. */
+function refreshAllPresets() {
+  const c = ctx();
+  for (const clip of state.clips) refreshPresets(clip, c);
+}
+
 function renderAll() {
+  refreshAllPresets();
   fitScale();
   renderCanvas();
   renderPanels();
@@ -1878,7 +1992,7 @@ const safeName = () => state.project.title.replace(/[^\w\- ]+/g, '').trim() || '
 async function save(as = false) {
   commitFloat();
   try {
-    const blob = await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips));
+    const blob = await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips, state.template));
     const prevPath = state.file?.path;
     const res = await platform.saveFile(blob, `${safeName()}.kenshape`, KENSHAPE, as ? null : state.file);
     if (!res) return;
@@ -1886,7 +2000,7 @@ async function save(as = false) {
     // files when Save as moves the project to another folder
     if (prevPath && res.path && prevPath !== res.path && state.autoExport.targets.length) {
       for (const t of state.autoExport.targets) t.path = storePath(res.path, targetAbsPath(prevPath, t));
-      await platform.writePath(res.path, await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips)));
+      await platform.writePath(res.path, await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active, state.clips, state.template)));
     }
     state.file = res;
     state.dirty = false;

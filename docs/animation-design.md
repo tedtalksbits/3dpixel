@@ -338,7 +338,7 @@ Code impact:
    - Tracks, easing, baking, playback in the 3D preview, a play bar, and glTF animation export.
 3. **Object presets** (done): spin, bob, swing, hinge, pulse and pop. They need one part and no template,
    so **the wheel works here**.
-4. **Templates and creature presets:**
+4. **Templates and creature presets** (done):
    - Role checklist, auto-split and auto-pivots.
    - Biped walk, run and idle, quadruped gaits, and shell retract. **The human and the turtle work
      here.**

@@ -6,6 +6,7 @@
 import { Project, Tile, emptyTile } from './kenshape';
 import { Clip, parseClips } from './anim';
 import { cleanPresets } from './presets';
+import { RigTemplate, TEMPLATES, TemplateKind } from './templates';
 
 export interface Part {
   id: string;
@@ -19,6 +20,8 @@ export interface Part {
   parent: string | null;
   /** Editor only: hidden parts are still saved and exported. */
   visible: boolean;
+  /** What the part is in its rig template (body, head, leg.near, ...), used by creature presets. */
+  role?: string;
 }
 
 export const RIG_KEY = 'rig';
@@ -115,14 +118,17 @@ interface StoredRig {
   active: number;
   parts: StoredPart[];
   clips?: Clip[];
+  template?: RigTemplate;
 }
 
 /** Take the parts out of a loaded project. Without a rig, the whole drawing is one part. */
-export function takeRig(p: Project): { parts: Part[]; active: number; clips: Clip[] } {
+export const noTemplate = (): RigTemplate => ({ kind: null, facing: 'right' });
+
+export function takeRig(p: Project): { parts: Part[]; active: number; clips: Clip[]; template: RigTemplate } {
   const raw = p[RIG_KEY] as StoredRig | undefined;
   delete p[RIG_KEY];
   const count = p.size.x * p.size.y;
-  if (!raw || !Array.isArray(raw.parts) || !raw.parts.length) return { parts: [basePart(p)], active: 0, clips: [] };
+  if (!raw || !Array.isArray(raw.parts) || !raw.parts.length) return { parts: [basePart(p)], active: 0, clips: [], template: noTemplate() };
   const parts: Part[] = raw.parts.map((s, i) => {
     const tiles = emptyGrid(p);
     for (const [k, t] of Array.isArray(s.tiles) ? s.tiles : []) if (k >= 0 && k < count) tiles[k] = { ...emptyTile(), ...t };
@@ -134,6 +140,7 @@ export function takeRig(p: Project): { parts: Part[]; active: number; clips: Cli
       z: +s.z || 0,
       parent: s.parent ?? null,
       visible: s.visible !== false,
+      ...(typeof s.role === 'string' && s.role ? { role: s.role } : {}),
     };
   });
   for (const part of parts) {
@@ -143,13 +150,18 @@ export function takeRig(p: Project): { parts: Part[]; active: number; clips: Cli
   const ids = new Set(parts.map((o) => o.id));
   const clips = parseClips(raw.clips, ids);
   for (const c of clips) cleanPresets(c, ids);
-  return { parts, active, clips };
+  const kind = raw.template?.kind;
+  const template: RigTemplate = {
+    kind: kind && kind in TEMPLATES ? (kind as TemplateKind) : null,
+    facing: raw.template?.facing === 'left' ? 'left' : 'right',
+  };
+  return { parts, active, clips, template };
 }
 
 /** The project as written to disk: flattened tiles, plus the parts and clips when there's anything to rig. */
-export function withRig(p: Project, parts: Part[], active: number, clips: Clip[] = []): Project {
+export function withRig(p: Project, parts: Part[], active: number, clips: Clip[] = [], template: RigTemplate = noTemplate()): Project {
   const out: Project = { ...p, tiles: flattenTiles(p, parts) };
-  if (parts.length < 2 && !clips.length) return out;
+  if (parts.length < 2 && !clips.length && !template.kind) return out;
   const rig: StoredRig = {
     version: 1,
     active,
@@ -159,5 +171,6 @@ export function withRig(p: Project, parts: Part[], active: number, clips: Clip[]
     })),
   };
   if (clips.length) rig.clips = clips;
+  if (template.kind) rig.template = template;
   return { ...out, [RIG_KEY]: rig };
 }

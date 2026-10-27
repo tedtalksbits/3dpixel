@@ -5,8 +5,11 @@
 
 import { Clip, Key, Prop, Track, Vec3, newClipId } from './anim';
 import { Ease } from './easing';
+import { CREATURE_PRESETS } from './creatures';
+import { RigCtx, TemplateKind, emptyCtx } from './templates';
 
-export type PresetId = 'spin' | 'bob' | 'swing' | 'hinge' | 'pulse' | 'pop';
+/** Object presets by name; creature presets are '<template>.<motion>', e.g. 'biped.walk'. */
+export type PresetId = string;
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
 
@@ -25,6 +28,13 @@ export interface ParamDef {
 
 export type PivotSpot = 'centre' | 'top' | 'bottom' | 'left' | 'right';
 
+/** A generated track; `part` defaults to the part the preset was applied to. */
+export interface Gen {
+  part?: string;
+  prop: Prop;
+  keys: Key[];
+}
+
 export interface PresetDef {
   id: PresetId;
   name: string;
@@ -36,7 +46,10 @@ export interface PresetDef {
   length: number; // default clip length for a new clip, seconds
   params: ParamDef[];
   loops: (p: Params) => boolean;
-  generate: (p: Params, duration: number) => { prop: Prop; keys: Key[] }[];
+  generate: (p: Params, duration: number, ctx: RigCtx) => Gen[];
+  /** Creature presets belong to a rig template and drive parts by role. */
+  template?: TemplateKind;
+  roles?: string[];
 }
 
 /** A preset applied to one part of a clip. */
@@ -69,7 +82,7 @@ function alternate(n: number, duration: number, a: Vec3, b: Vec3, ease: Ease): K
   return keys;
 }
 
-export const PRESETS: Record<PresetId, PresetDef> = {
+const OBJECT_PRESETS: Record<string, PresetDef> = {
   spin: {
     id: 'spin',
     name: 'Spin',
@@ -197,34 +210,37 @@ export const PRESETS: Record<PresetId, PresetDef> = {
   },
 };
 
-export const PRESET_LIST = Object.values(PRESETS);
+export const PRESETS: Record<PresetId, PresetDef> = { ...OBJECT_PRESETS, ...Object.fromEntries(CREATURE_PRESETS.map((d) => [d.id, d])) };
+
+/** Presets for any single part. */
+export const PRESET_LIST = Object.values(OBJECT_PRESETS);
+export const presetsFor = (kind: TemplateKind) => CREATURE_PRESETS.filter((d) => d.template === kind);
 
 export const defaultParams = (def: PresetDef): Params => Object.fromEntries(def.params.map((p) => [p.key, p.default]));
 
 /** Regenerate one preset's tracks in its clip. Tracks it owned are replaced; returns the props it drives. */
-export function applyPreset(clip: Clip, use: PresetUse): Prop[] {
+export function applyPreset(clip: Clip, use: PresetUse, ctx: RigCtx = emptyCtx): Gen[] {
   const def = PRESETS[use.preset];
   clip.tracks = clip.tracks.filter((tr) => tr.preset !== use.id);
-  const made = def.generate(use.params, clip.duration);
+  const made = def.generate(use.params, clip.duration, ctx);
   for (const g of made) {
-    const tr: Track = { part: use.part, prop: g.prop, keys: g.keys, preset: use.id };
+    const tr: Track = { part: g.part ?? use.part, prop: g.prop, keys: g.keys, preset: use.id };
     clip.tracks.push(tr);
   }
-  return made.map((g) => g.prop);
+  return made;
 }
 
 /** Add a preset to a clip, replacing whatever already drives the same part and properties. */
-export function addPreset(clip: Clip, preset: PresetId, part: string): PresetUse {
+export function addPreset(clip: Clip, preset: PresetId, part: string, ctx: RigCtx = emptyCtx): PresetUse {
   const def = PRESETS[preset];
   const use: PresetUse = { id: newClipId(), preset, part, params: defaultParams(def) };
-  const props = new Set(def.generate(use.params, clip.duration).map((g) => g.prop));
-  // earlier presets on the same part and properties give way (their other tracks go too)
-  for (const old of clip.presets ?? []) {
-    if (old.part === part && clip.tracks.some((tr) => tr.preset === old.id && props.has(tr.prop))) removePreset(clip, old.id);
-  }
-  clip.tracks = clip.tracks.filter((tr) => !(tr.part === part && props.has(tr.prop)));
+  const drives = new Set(def.generate(use.params, clip.duration, ctx).map((g) => `${g.part ?? part}|${g.prop}`));
+  const clash = (tr: Track) => drives.has(`${tr.part}|${tr.prop}`);
+  // earlier presets that drive the same part and property give way (their other tracks go too)
+  for (const old of [...(clip.presets ?? [])]) if (clip.tracks.some((tr) => tr.preset === old.id && clash(tr))) removePreset(clip, old.id);
+  clip.tracks = clip.tracks.filter((tr) => !clash(tr));
   (clip.presets ??= []).push(use);
-  applyPreset(clip, use);
+  applyPreset(clip, use, ctx);
   return use;
 }
 
@@ -240,8 +256,8 @@ export function customisePreset(clip: Clip, id: string) {
 }
 
 /** After the clip's length changes, rebuild every live preset to fit it. */
-export function refreshPresets(clip: Clip) {
-  for (const use of clip.presets ?? []) applyPreset(clip, use);
+export function refreshPresets(clip: Clip, ctx: RigCtx = emptyCtx) {
+  for (const use of clip.presets ?? []) applyPreset(clip, use, ctx);
 }
 
 /** Bring stored params in line with the preset's definition (unknown keys dropped, bad values defaulted). */

@@ -113,6 +113,24 @@ other browsers download a copy instead.
   - Each preset card has pivot buttons (centre or an edge), with the usual spot for that motion
     highlighted.
   - **Customise**, or editing a preset's values by hand, turns the preset into plain keys.
+- **Creature templates and presets** (side view):
+  - In Parts, pick a **rig template**: Biped, Four-legged or Shell creature. It lists the template's
+    roles (body, head, near and far arms and legs, tail), and "Guess roles" fills them in from part
+    names ("head", "arm", "far"...), Z and pivots. It also sets which way the creature faces from
+    where its head is. Fix any role with its menu.
+  - **Biped:** Walk, Run, Idle. Legs and arms swing in opposition, the body bobs twice per cycle,
+    and the head lags. Run adds a forward lean.
+  - **Four-legged:** Walk, Trot, Pace, Canter, Gallop, Idle. Each gait uses the real footfall order:
+    a walk goes back, front, back, front, a quarter cycle apart; a trot moves diagonal pairs
+    together; a gallop gathers and stretches.
+  - **Shell creature:** Hide (head, legs and tail slide into the shell and shrink, then the shell
+    drops and bounces), Peek back out, or Hide then peek as a loop. Plus a slow Walk.
+  - Legs plant forward, sweep back steadily while on the ground, then swing forward, so feet
+    don't skate. Every motion is a slider: leg and arm swing, bounce, lean, head bob, tail sway,
+    body rock.
+  - Presets drive parts by role, so any model rigged with the template works, and roles with no
+    part are skipped. They follow the rig live: change a role, the facing or a pivot and the
+    animation updates.
 - **Import SVG without blurring:**
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
@@ -171,6 +189,8 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/anim.ts`: clips, keyframes, sampling and bake times
 - `src/easing.ts`: easing functions
 - `src/presets.ts`: animation presets that generate keyframe tracks
+- `src/templates.ts`: rig templates, roles and role guessing
+- `src/creatures.ts`: biped, four-legged and shell creature presets
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

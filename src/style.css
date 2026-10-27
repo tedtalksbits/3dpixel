@@ -305,3 +305,13 @@ button.icon.small { padding: 1px 6px; font-size: 13px; }
 .pivot-row .label { min-width: 0; margin-right: auto; font-size: 11px; }
 .pivot-row button.suggested { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .pivot-row button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* rig template */
+.rig-template { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.rig-template h3 { font-size: 12px; font-weight: 600; margin: 0 0 2px; }
+.rig-template .roles { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.panel .rig-template label.role-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 6px; margin: 0; }
+.panel .rig-template label.role-row span { font-size: 11px; color: var(--text); white-space: nowrap; }
+.panel .rig-template label.role-row select { width: 58%; padding: 3px 5px; font-size: 12px; }
+.panel .rig-template label.role-row.unset span { color: var(--muted); }
+#anim h3 .hint { margin-left: 4px; }
