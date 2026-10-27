@@ -66,7 +66,24 @@ other browsers download a copy instead.
   Paths are stored in the `.kenshape` relative to it, so the project can move along with your game.
   Kenney Shape ignores this list, but drops it if Kenney Shape saves the file. **Export now** writes
   the targets without saving.
-- **Import SVG without blurring:**
+- **Parts for rigging**, the first step towards animation (see `docs/animation-design.md`):
+  - A drawing can be split into parts, such as head, arm and leg, each on its own layer with a
+    pivot, a parent and a Z offset. Your tools edit the selected part, and the other parts fade so
+    you can tell which one that is.
+  - **From selection (Ctrl+J)** cuts the selected tiles into a new part, parented to the part they
+    came from. Its pivot is placed automatically where it joins the parent: a shoulder at the top
+    of an arm, a hip at the top of a leg, a neck under a head.
+  - **Far copy** duplicates a part one step behind with darker colours, for the far arm or leg in
+    a side view.
+  - The **Pivot tool (P)** places a pivot by clicking or dragging, snapped to half tiles. While it's
+    active, lines show each part's parent.
+  - **Test joint** swings the part about its pivot in the 3D view.
+  - GLB export becomes a node tree: one node per part, at its pivot, with children under their
+    parent. Rotating a node in Godot, Unity, Blender or Three.js swings that part about its joint.
+    OBJ gets one object per part.
+  - The `.kenshape` still holds the flattened drawing, so Kenney Shape opens it. The parts are kept
+    under an extra key.
+
   - SVGs exported by Kenney Shape or by this editor are decoded tile for tile, so nothing changes.
   - Any other SVG is rendered and fitted to the grid, picking the shape, rotation and colour with
     the smallest pixel error for each tile. Colours come from the SVG's own fills, not from blurred
@@ -78,6 +95,8 @@ other browsers download a copy instead.
 | --- | --- |
 | V / M / W | Move / Select / Magic wand |
 | B / E / G / D / I | Draw / Erase / Fill / Depth / Pick |
+| P | Pivot (place the selected part's pivot) |
+| Ctrl+J | Make a part from the selection |
 | Left drag | Use the current tool |
 | Right drag | Erase (Draw), opposite direction (Depth), sample depth (Depth in Set mode) |
 | Alt + click | Pick shape, angle, colour and depth from a tile |
@@ -116,6 +135,7 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/settings.ts`: preferences and the settings dialog
 - `src/platform.ts`: file dialogs, reading and writing, and window integration, for both the browser and the desktop app
 - `src/autoExport.ts`: export-on-save targets
+- `src/rig.ts`: parts, pivots, flattening and the `rig` file key
 - `src/main.ts`: editor UI, tools and selection
 - `src-tauri/`: the desktop app (Rust): file read/write commands, launch-file handling, config and icons
 - `docs/kenshape-format.md`: file format notes

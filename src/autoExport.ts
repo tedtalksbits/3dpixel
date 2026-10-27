@@ -6,6 +6,7 @@
 import { Project } from './kenshape';
 import { exportSvg, exportPng, SvgGrouping } from './svgExport';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
+import { Part, flattenTiles } from './rig';
 import { FileType, basename, dirname, relativePath, resolvePath, stripExt, writePath } from './platform';
 
 export type TargetFormat = 'glb' | 'obj' | 'png' | 'svg';
@@ -58,23 +59,24 @@ export const storePath = (projectPath: string | undefined, abs: string) =>
 
 export const targetAbsPath = (projectPath: string, t: ExportTarget) => resolvePath(dirname(projectPath), t.path);
 
-async function render(p: Project, t: ExportTarget, abs: string): Promise<[string, Blob | string][]> {
+async function render(p: Project, rig: Part[], t: ExportTarget, abs: string): Promise<[string, Blob | string][]> {
+  const flat = { ...p, tiles: flattenTiles(p, rig) };
   const model = { scale: t.scale ?? 'tile', pivot: t.pivot ?? 'center' };
   switch (t.format) {
     case 'glb':
-      return [[abs, await exportGlb(p, model)]];
+      return [[abs, await exportGlb(p, model, rig)]];
     case 'obj': {
       // the .mtl sits beside the .obj and is referenced by file name
       const mtlPath = stripExt(abs) + '.mtl';
-      const { obj, mtl } = exportObj(p, basename(mtlPath), model);
+      const { obj, mtl } = exportObj(p, basename(mtlPath), model, rig);
       return [[abs, obj], [mtlPath, mtl]];
     }
     case 'png': {
       const size = t.size ?? 64;
-      return [[abs, await exportPng(p, size, size, { crisp: !!t.crisp })]];
+      return [[abs, await exportPng(flat, size, size, { crisp: !!t.crisp })]];
     }
     case 'svg':
-      return [[abs, exportSvg(p, { grouping: t.grouping ?? 'shape', width: p.size.x * 16, height: p.size.y * 16 })]];
+      return [[abs, exportSvg(flat, { grouping: t.grouping ?? 'shape', width: p.size.x * 16, height: p.size.y * 16 })]];
   }
 }
 
@@ -83,12 +85,12 @@ export interface ExportResult {
   errors: string[];
 }
 
-export async function runAutoExport(p: Project, projectPath: string, cfg: AutoExport): Promise<ExportResult> {
+export async function runAutoExport(p: Project, rig: Part[], projectPath: string, cfg: AutoExport): Promise<ExportResult> {
   const res: ExportResult = { written: [], errors: [] };
   for (const t of cfg.targets) {
     const abs = targetAbsPath(projectPath, t);
     try {
-      for (const [path, data] of await render(p, t, abs)) {
+      for (const [path, data] of await render(p, rig, t, abs)) {
         await writePath(path, data);
         res.written.push(path);
       }

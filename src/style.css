@@ -241,3 +241,22 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.icon.small { padding: 1px 6px; font-size: 13px; }
 .auto-export .row select { flex: 1; min-width: 0; }
 .auto-export .row button { flex: 0 0 auto; }
+
+/* parts */
+.panel h2 .check-inline { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; margin: 0; cursor: pointer; }
+.panel h2 .check-inline input { width: auto; margin: 0; }
+.parts { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.part-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
+.part-row:hover { background: var(--panel-2); }
+.part-row.active { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.part-row .part-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-row .eye { background: none; border: 0; padding: 0 2px; font-size: 12px; color: var(--text); }
+.part-row .eye.off { color: var(--muted); }
+.part-props { margin-top: 4px; }
+.part-props .stepper { flex: 1; }
+.btn-grid button.active { border-color: var(--accent); color: var(--accent); }
+.canvas[data-tool='pivot'] svg { cursor: crosshair; }
+.canvas .bone { stroke: #ff3b6b; stroke-width: 2; stroke-dasharray: 4 3; }
+.canvas .pivot-dot { fill: #fff; stroke: #ff3b6b; stroke-width: 2; }
+.canvas .pivot-active circle { fill: rgba(255, 59, 107, 0.15); stroke: #ff3b6b; stroke-width: 2.5; }
+.canvas .pivot-active path { stroke: #ff3b6b; stroke-width: 2; }

@@ -1,9 +1,10 @@
 import {
-  WebGLRenderer, Scene, PerspectiveCamera, HemisphereLight, DirectionalLight, Group, Mesh, MeshStandardMaterial, Vector3, Color, GridHelper, LineBasicMaterial,
+  WebGLRenderer, Scene, PerspectiveCamera, HemisphereLight, DirectionalLight, Group, Mesh, MeshBasicMaterial, SphereGeometry, Object3D, Vector3, Color, GridHelper, LineBasicMaterial,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Project } from './kenshape';
-import { buildGroup } from './modelExport';
+import { buildGroup, disposeGroup } from './modelExport';
+import { Part } from './rig';
 
 export class Preview3D {
   private renderer: WebGLRenderer;
@@ -71,17 +72,19 @@ export class Preview3D {
     }
   }
 
-  update(p: Project) {
+  /** Rebuild the model. With rig parts, `active` gets a pivot marker and hidden parts are left out. */
+  update(p: Project, rig?: Part[], active?: string) {
     if (this.model) {
       this.scene.remove(this.model);
-      this.model.traverse((o) => {
-        if (o instanceof Mesh) {
-          o.geometry.dispose();
-          (o.material as MeshStandardMaterial).dispose();
-        }
-      });
+      disposeGroup(this.model);
     }
-    this.model = buildGroup(p);
+    this.model = buildGroup(p, {}, rig);
+    this.model.traverse((o) => {
+      const part = rig?.find((r) => r.id === o.userData.partId);
+      if (!part) return;
+      o.visible = part.visible;
+      if (part.id === active) o.add(this.pivotMarker());
+    });
     this.scene.add(this.model);
     // only reframe when the grid size changes, so editing doesn't move the camera
     const sizeKey = `${p.size.x}x${p.size.y}`;
@@ -91,6 +94,36 @@ export class Preview3D {
       this.resetView();
     }
     this.requestRender();
+  }
+
+  private pivotMarker() {
+    const mat = new MeshBasicMaterial({ color: 0xff3b6b, depthTest: false, transparent: true });
+    const dot = new Mesh(new SphereGeometry(0.18, 16, 8), mat);
+    dot.renderOrder = 10;
+    dot.userData.editorOnly = true;
+    return dot;
+  }
+
+  private wiggling: { id: string; start: number } | null = null;
+
+  /** Swing a part back and forth about its pivot (around Z, the side-view axis) to check the joint. */
+  wiggle(partId: string) {
+    this.wiggling = { id: partId, start: performance.now() };
+    this.requestRender();
+  }
+
+  private applyWiggle(): boolean {
+    const w = this.wiggling;
+    if (!w || !this.model) return false;
+    let node: Object3D | undefined;
+    this.model.traverse((o) => {
+      if (o.userData.partId === w.id) node = o;
+    });
+    const t = (performance.now() - w.start) / 1000;
+    const done = t > 1.6 || !node;
+    if (node) node.rotation.z = done ? 0 : Math.sin(t * Math.PI * 2.5) * 0.5 * (1 - t / 1.6);
+    if (done) this.wiggling = null;
+    return !done;
   }
 
   resetView() {
@@ -122,7 +155,8 @@ export class Preview3D {
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       // damping keeps the camera moving for a few frames after input
-      if (this.controls.update()) this.requestRender();
+      const moving = this.controls.update();
+      if (this.applyWiggle() || moving) this.requestRender();
       this.renderer.render(this.scene, this.camera);
     });
   }

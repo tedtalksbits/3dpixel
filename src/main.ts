@@ -7,15 +7,16 @@ import { Preview3D } from './preview3d';
 import { exportGlb, exportObj, ModelScale, ModelPivot } from './modelExport';
 import { tileDepths } from './mesh';
 import { transformShape, ShapeXf } from './transform';
-import { openColorPicker, hexToRgb } from './colorPicker';
+import { openColorPicker, hexToRgb, rgbToHex } from './colorPicker';
 import { settings, onSettingsChange, openSettings } from './settings';
 import * as platform from './platform';
 import { FileRef, FileType } from './platform';
 import {
   AutoExport, ExportTarget, TargetFormat, FORMATS, emptyAutoExport, takeAutoExport, withAutoExport, storePath, targetAbsPath, runAutoExport,
 } from './autoExport';
+import { Part, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
 
-type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick';
+type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
 type DepthMode = 'set' | 'raise' | 'lower';
 type DepthView = 'off' | 'numbers' | 'map';
 type WandMatch = 'color' | 'colorDepth' | 'tile';
@@ -39,6 +40,8 @@ interface Floating {
 }
 interface Snapshot {
   project: Project;
+  parts: Part[];
+  active: number;
   sel: number[];
 }
 
@@ -48,8 +51,14 @@ const clampDepth = (d: number) => Math.max(DEPTH_MIN, Math.min(DEPTH_MAX, Math.r
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
+const initialProject = newProject(settings.newSize);
+
 const state = {
-  project: newProject(settings.newSize),
+  project: initialProject,
+  /** Rig parts (layers). The active part's tiles array is the same array as project.tiles, so every tool edits it. */
+  parts: [basePart(initialProject)] as Part[],
+  active: 0,
+  dimOthers: true,
   tool: 'draw' as Tool,
   shape: 0,
   angle: 0,
@@ -77,7 +86,7 @@ const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < state.project
 
 // ---------- history ----------
 
-const snapshot = (): Snapshot => ({ project: cloneProject(state.project), sel: [...state.sel] });
+const snapshot = (): Snapshot => ({ project: cloneProject(state.project), parts: structuredClone(state.parts), active: state.active, sel: [...state.sel] });
 
 function checkpoint() {
   state.undo.push(snapshot());
@@ -88,6 +97,9 @@ function checkpoint() {
 
 function restore(s: Snapshot) {
   state.project = s.project;
+  state.parts = s.parts;
+  state.active = s.active;
+  state.project.tiles = s.parts[s.active].tiles;
   state.sel = new Set(s.sel);
   state.float = null;
 }
@@ -112,6 +124,10 @@ function redo() {
 
 function setProject(p: Project, file: FileRef | null = null) {
   state.autoExport = takeAutoExport(p);
+  const rig = takeRig(p);
+  state.parts = rig.parts;
+  state.active = rig.active;
+  p.tiles = rig.parts[rig.active].tiles;
   state.project = p;
   state.undo = [];
   state.redo = [];
@@ -176,6 +192,21 @@ function composite(): Project {
   }
   return p;
 }
+
+/** Every part as it currently looks; the active one includes floating tiles. */
+function liveParts(): Part[] {
+  const c = composite();
+  return state.parts.map((pt, i) => (i === state.active ? { ...pt, tiles: c.tiles } : pt));
+}
+
+/** All parts flattened into one drawing, for 2D previews and exports. */
+function flat(): Project {
+  const c = composite();
+  if (state.parts.length === 1) return c;
+  return { ...c, tiles: flattenTiles(c, liveParts()) };
+}
+
+const activePart = () => state.parts[state.active];
 
 function nudge(dx: number, dy: number) {
   if (!state.float && !lift(state.sel.size === 0)) return;
@@ -442,15 +473,28 @@ function renderCanvas() {
   };
 
   let numbers = '';
-  for (let x = 0; x < p.size.x; x++) {
-    for (let y = 0; y < p.size.y; y++) {
-      const t = getTile(p, x, y);
-      if (t.color < 0) continue;
-      const d = tileDepths(t.depth, 0)[0];
-      s += `<path fill="${view === 'map' ? depthFill(d) : p.colors[t.color]}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
-      if (view !== 'off' && tilePx >= 14)
-        numbers += `<text x="${x * TILE + 16}" y="${y * TILE + 21}">${d}</text>`;
+  const many = state.parts.length > 1;
+  const activeId = activePart().id;
+  for (const part of drawOrder(liveParts())) {
+    const isActive = part.id === activeId;
+    if (!isActive && !part.visible) continue;
+    let layer = '';
+    for (let x = 0; x < p.size.x; x++) {
+      for (let y = 0; y < p.size.y; y++) {
+        const t = part.tiles[tileIndex(p, x, y)];
+        if (t.color < 0) continue;
+        if (!isActive) {
+          layer += `<path fill="${p.colors[t.color]}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
+          continue;
+        }
+        const d = tileDepths(t.depth, 0)[0];
+        layer += `<path fill="${view === 'map' ? depthFill(d) : p.colors[t.color]}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
+        if (view !== 'off' && tilePx >= 14)
+          numbers += `<text x="${x * TILE + 16}" y="${y * TILE + 21}">${d}</text>`;
+      }
     }
+    // other parts are faded so it's clear which one the tools edit
+    s += many && !isActive && state.dimOthers ? `<g opacity="0.35">${layer}</g>` : layer;
   }
   if (settings.showGrid) {
     let grid = '';
@@ -481,8 +525,10 @@ function renderCanvas() {
     s += `<rect x="${x0 * TILE}" y="${y0 * TILE}" width="${(x1 - x0 + 1) * TILE}" height="${(y1 - y0 + 1) * TILE}" class="marquee" vector-effect="non-scaling-stroke"/>`;
   }
 
+  if (many || state.tool === 'pivot') s += pivotOverlay();
+
   const h = state.hover;
-  if (h && inBounds(h.x, h.y) && !drag?.kind?.match(/marquee|move/)) {
+  if (h && inBounds(h.x, h.y) && !drag?.kind?.match(/marquee|move|pivot/)) {
     const tool = state.tool;
     if ((tool === 'draw' || tool === 'fill') && canPaintAt(h.x, h.y)) {
       s += `<path fill="${p.colors[state.color]}" fill-opacity="0.55" d="${tilePath(h.x, h.y, state.shape, state.angle)}"/>`;
@@ -501,6 +547,42 @@ function renderCanvas() {
   } else legend.classList.add('hidden');
 
   canvas.dataset.tool = state.tool;
+}
+
+/** Pivots as dots; with the Pivot tool, lines from each pivot to its parent's show the hierarchy. */
+function pivotOverlay() {
+  const at = (pt: Part) => [pt.pivot[0] * TILE, pt.pivot[1] * TILE];
+  const bones = state.tool === 'pivot';
+  const active = activePart();
+  let o = '';
+  for (const pt of state.parts) {
+    if (!pt.visible && pt !== active) continue;
+    const [x, y] = at(pt);
+    const parent = pt.parent ? state.parts.find((q) => q.id === pt.parent) : undefined;
+    if (bones && parent) {
+      const [px, py] = at(parent);
+      o += `<line x1="${px}" y1="${py}" x2="${x}" y2="${y}" class="bone" vector-effect="non-scaling-stroke"/>`;
+    }
+    if (pt !== active && bones) o += `<circle cx="${x}" cy="${y}" r="5" class="pivot-dot" vector-effect="non-scaling-stroke"/>`;
+  }
+  const [x, y] = at(active);
+  return o + `<g class="pivot-active"><circle cx="${x}" cy="${y}" r="9" vector-effect="non-scaling-stroke"/><path d="M${x - 15} ${y}h30M${x} ${y - 15}v30" vector-effect="non-scaling-stroke"/></g>`;
+}
+
+/** Place the active part's pivot under the pointer, snapped to half tiles. */
+function setPivotAt(e: PointerEvent) {
+  const r = canvas.getBoundingClientRect();
+  const { x: w, y: h } = state.project.size;
+  const snap = (v: number, max: number) => Math.max(0, Math.min(max, Math.round(v * 2) / 2));
+  const px = snap(((e.clientX - r.left) / r.width) * w, w);
+  const py = snap(((e.clientY - r.top) / r.height) * h, h);
+  const part = activePart();
+  if (part.pivot[0] === px && part.pivot[1] === py) return;
+  part.pivot = [px, py];
+  state.dirty = true;
+  renderCanvas();
+  renderParts();
+  schedule3d();
 }
 
 function rawTile(e: PointerEvent) {
@@ -554,6 +636,12 @@ canvas.addEventListener('pointerdown', (e) => {
       renderAll();
       return;
     }
+    case 'pivot':
+      commitFloat();
+      checkpoint();
+      drag = { kind: 'pivot' };
+      setPivotAt(e);
+      return;
     case 'pick':
       pick(t.x, t.y);
       renderPanels();
@@ -625,7 +713,8 @@ canvas.addEventListener('pointermove', (e) => {
   const t = rawTile(e);
   const changed = t.x !== state.hover?.x || t.y !== state.hover?.y;
   state.hover = t;
-  if (drag) {
+  if (drag?.kind === 'pivot') setPivotAt(e);
+  else if (drag) {
     if (changed) applyDrag(t);
   } else if (changed) renderCanvas();
 });
@@ -663,6 +752,7 @@ const TOOLS: { id: Tool; label: string; icon: string; key: string; help: string 
   { id: 'fill', label: 'Fill', icon: '▧', key: 'G', help: 'Fills matching tiles with the current shape, colour and depth. Stays inside the selection.' },
   { id: 'depth', label: 'Depth', icon: '⇕', key: 'D', help: 'Paint depth onto tiles without changing their shape or colour.' },
   { id: 'pick', label: 'Pick', icon: '⊙', key: 'I', help: 'Click a tile to copy its shape, colour and depth to the brush.' },
+  { id: 'pivot', label: 'Pivot', icon: '⊕', key: 'P', help: "Click or drag to place the selected part's pivot, the point it rotates around. Snaps to half tiles. Lines show each part's parent." },
 ];
 
 function setTool(t: Tool) {
@@ -769,6 +859,7 @@ function renderPanels() {
   }
   platform.setWindowTitle(`${name}${state.dirty ? ' •' : ''} — 3dpixel`);
   renderAutoExport();
+  renderParts();
 }
 
 function renderOptions() {
@@ -822,7 +913,7 @@ function renderPreview() {
   previewTimer = window.setTimeout(async () => {
     const size = pngSize();
     const crisp = $<HTMLInputElement>('png-crisp').checked;
-    const p = composite();
+    const p = flat();
     const [small, large] = await Promise.all([exportPng(p, size, size, { crisp }), exportPng(p, 256, 256)]);
     previewUrls.forEach(URL.revokeObjectURL);
     previewUrls = [URL.createObjectURL(small), URL.createObjectURL(large)];
@@ -906,7 +997,7 @@ $('btn-del-color').addEventListener('click', () => {
   const p = state.project;
   if (p.colors.length <= 1) return;
   const i = state.color;
-  const used = p.tiles.filter((t) => t.color === i || t.colorBack === i).length;
+  const used = state.parts.reduce((n, pt) => n + pt.tiles.filter((t) => t.color === i || t.colorBack === i).length, 0);
   const rgb = hexToRgb(p.colors[i]);
   let nearest = i === 0 ? 1 : 0;
   let best = Infinity;
@@ -923,9 +1014,11 @@ $('btn-del-color').addEventListener('click', () => {
     const v = c === i ? nearest : c;
     return v > i ? v - 1 : v; // indices after the removed swatch shift down by one
   };
-  for (const t of p.tiles) {
-    if (t.color >= 0) t.color = remap(t.color);
-    if (t.colorBack >= 0) t.colorBack = remap(t.colorBack);
+  for (const pt of state.parts) {
+    for (const t of pt.tiles) {
+      if (t.color >= 0) t.color = remap(t.color);
+      if (t.colorBack >= 0) t.colorBack = remap(t.colorBack);
+    }
   }
   p.colors.splice(i, 1);
   state.color = Math.min(i, p.colors.length - 1);
@@ -956,6 +1049,223 @@ $<HTMLInputElement>('title').addEventListener('change', (e) => {
   renderPanels();
 });
 
+// ---------- parts (rig layers) ----------
+
+function selectPart(i: number) {
+  commitFloat();
+  state.active = Math.max(0, Math.min(state.parts.length - 1, i));
+  state.project.tiles = activePart().tiles;
+  renderAll();
+}
+
+const tileCount = (pt: Part) => pt.tiles.reduce((n, t) => n + (t.color >= 0 ? 1 : 0), 0);
+const partById = (id: string | null) => (id ? state.parts.find((o) => o.id === id) ?? null : null);
+
+function nextPartName() {
+  for (let n = state.parts.length; ; n++) if (!state.parts.some((o) => o.name === `Part ${n}`)) return `Part ${n}`;
+}
+
+function nearestColor(hex: string) {
+  const rgb = hexToRgb(hex);
+  let best = 0;
+  let bestD = Infinity;
+  state.project.colors.forEach((c, j) => {
+    const o = hexToRgb(c);
+    const d = (o[0] - rgb[0]) ** 2 + (o[1] - rgb[1]) ** 2 + (o[2] - rgb[2]) ** 2;
+    if (d < bestD) (bestD = d), (best = j);
+  });
+  return best;
+}
+
+/** Ctrl+J: move the selected tiles of the current part into a new part, parented to it. */
+function partFromSelection() {
+  if (!hasSelection()) {
+    flash('Select some tiles first, then press Ctrl+J to make them a part.');
+    return;
+  }
+  commitFloat();
+  const p = state.project;
+  const src = activePart();
+  const moved: number[] = [];
+  for (const k of state.sel) {
+    const [x, y] = unpack(k);
+    if (inBounds(x, y) && src.tiles[tileIndex(p, x, y)].color >= 0) moved.push(tileIndex(p, x, y));
+  }
+  if (!moved.length) {
+    flash(`The selection has no tiles in ${src.name}.`, true);
+    return;
+  }
+  checkpoint();
+  const tiles = emptyGrid(p);
+  for (const i of moved) {
+    tiles[i] = src.tiles[i];
+    src.tiles[i] = emptyTile();
+  }
+  const part: Part = { id: newPartId(), name: nextPartName(), tiles, pivot: [0, 0], z: src.z, parent: src.id, visible: true };
+  part.pivot = autoPivot(p, part, src);
+  state.parts.splice(state.active + 1, 0, part);
+  state.sel.clear();
+  selectPart(state.active + 1);
+  flash(`Made ${part.name} from ${moved.length} tile${moved.length === 1 ? '' : 's'}. Rename it and check its pivot.`);
+}
+
+function addEmptyPart() {
+  commitFloat();
+  checkpoint();
+  const p = state.project;
+  const root = state.parts.find((o) => !o.parent) ?? null;
+  const part: Part = { id: newPartId(), name: nextPartName(), tiles: emptyGrid(p), pivot: [p.size.x / 2, p.size.y / 2], z: activePart().z, parent: root?.id ?? null, visible: true };
+  state.parts.splice(state.active + 1, 0, part);
+  selectPart(state.active + 1);
+}
+
+/** Copy the current part one step behind, with darker colours: the far arm or leg in a side view. */
+function farCopy() {
+  commitFloat();
+  const src = activePart();
+  if (!tileCount(src)) {
+    flash(`${src.name} has no tiles to copy.`, true);
+    return;
+  }
+  checkpoint();
+  const colors = state.project.colors;
+  const darker = new Map<number, number>();
+  const darken = (c: number) => {
+    if (c < 0) return c;
+    if (!darker.has(c)) {
+      const hex = rgbToHex(hexToRgb(colors[c]).map((v) => v * 0.72) as [number, number, number]);
+      let j = colors.findIndex((o) => o.toUpperCase() === hex);
+      if (j < 0 && colors.length < PALETTE_MAX) (j = colors.length), colors.push(hex);
+      darker.set(c, j < 0 ? nearestColor(hex) : j);
+    }
+    return darker.get(c)!;
+  };
+  const tiles = src.tiles.map((t) => (t.color < 0 ? emptyTile() : { ...t, color: darken(t.color), colorBack: darken(t.colorBack) }));
+  const part: Part = { id: newPartId(), name: `${src.name} (far)`, tiles, pivot: [...src.pivot], z: src.z - 1, parent: src.parent, visible: true };
+  state.parts.splice(state.active, 0, part); // listed just before the original
+  selectPart(state.active);
+  flash(`Made ${part.name}: 1 step behind, colours darkened. Adjust Z if it sits inside the body.`);
+}
+
+function deletePart() {
+  if (state.parts.length < 2) return;
+  commitFloat();
+  checkpoint();
+  const gone = activePart();
+  for (const pt of state.parts) if (pt.parent === gone.id) pt.parent = gone.parent;
+  state.parts.splice(state.active, 1);
+  selectPart(Math.min(state.active, state.parts.length - 1));
+}
+
+function partDepth(pt: Part) {
+  let d = 0;
+  for (let cur = partById(pt.parent); cur && d < state.parts.length; cur = partById(cur.parent)) d++;
+  return d;
+}
+
+function testJoint() {
+  if (viewMode === '2d') setView('split');
+  clearTimeout(timer3d);
+  preview3d.update(composite(), liveParts(), activePart().id);
+  preview3d.wiggle(activePart().id);
+}
+
+function renderParts() {
+  const active = activePart();
+  $('parts').innerHTML = treeOrder(state.parts)
+    .map((pt) => {
+      const i = state.parts.indexOf(pt);
+      const n = tileCount(pt);
+      return `<div class="part-row${i === state.active ? ' active' : ''}" data-part="${i}" style="padding-left:${4 + partDepth(pt) * 14}px">
+        <button class="eye${pt.visible ? '' : ' off'}" data-eye="${i}" title="${pt.visible ? 'Hide' : 'Show'} in the editor (still exported)">${pt.visible ? '◉' : '○'}</button>
+        <span class="part-name">${escapeHtml(pt.name)}</span>
+        <span class="hint">${n} tile${n === 1 ? '' : 's'}${pt.z ? ` · z ${pt.z > 0 ? '+' : ''}${pt.z}` : ''}</span>
+      </div>`;
+    })
+    .join('');
+  $<HTMLButtonElement>('part-from-sel').disabled = !hasSelection();
+  $<HTMLButtonElement>('part-delete').disabled = state.parts.length < 2;
+  $<HTMLInputElement>('parts-dim').checked = state.dimOthers;
+
+  const props = $('part-props');
+  if (props.contains(document.activeElement) && document.activeElement?.matches('input')) return;
+  const parents = state.parts.filter((o) => o !== active && !wouldCycle(state.parts, active.id, o.id));
+  props.innerHTML = `
+    <label>Name <input id="part-name" value="${escapeHtml(active.name)}" spellcheck="false" /></label>
+    <label>Parent <select id="part-parent"><option value="">None (root)</option>${parents
+      .map((o) => `<option value="${o.id}"${o.id === active.parent ? ' selected' : ''}>${escapeHtml(o.name)}</option>`)
+      .join('')}</select></label>
+    <div class="row"><span class="label" title="Distance in front of (+) or behind (−) the body, in tiles">Z</span>
+      <div class="stepper"><button data-z="-0.5" title="Further back">−</button><input id="part-z" type="number" step="0.5" value="${active.z}" /><button data-z="0.5" title="Further forward">+</button></div></div>
+    <div class="row"><span class="label">Pivot</span><span class="mono">${active.pivot[0]}, ${active.pivot[1]}</span></div>
+    <div class="btn-grid">
+      <button id="part-pivot-tool" class="${state.tool === 'pivot' ? 'active' : ''}" title="Click or drag on the canvas to place the pivot (P)">Place pivot</button>
+      <button id="part-pivot-auto" title="Put the pivot where this part touches its parent">Auto pivot</button>
+    </div>
+    <button id="part-wiggle" class="wide" title="Swing this part about its pivot in the 3D view">Test joint</button>`;
+}
+
+const partsPanel = $('parts-panel');
+partsPanel.addEventListener('click', (e) => {
+  const el = e.target as HTMLElement;
+  const eye = el.closest<HTMLElement>('[data-eye]');
+  if (eye) {
+    const pt = state.parts[+eye.dataset.eye!];
+    pt.visible = !pt.visible;
+    state.dirty = true;
+    renderAll();
+    return;
+  }
+  const row = el.closest<HTMLElement>('[data-part]');
+  if (row) return selectPart(+row.dataset.part!);
+  const zb = el.closest<HTMLElement>('[data-z]');
+  if (zb) {
+    checkpoint();
+    activePart().z += +zb.dataset.z!;
+    return renderAll();
+  }
+  switch (el.closest('button')?.id) {
+    case 'part-from-sel':
+      return partFromSelection();
+    case 'part-new':
+      return addEmptyPart();
+    case 'part-far':
+      return farCopy();
+    case 'part-delete':
+      return deletePart();
+    case 'part-pivot-tool':
+      return setTool('pivot');
+    case 'part-pivot-auto': {
+      checkpoint();
+      const pt = activePart();
+      pt.pivot = autoPivot(state.project, pt, partById(pt.parent));
+      return renderAll();
+    }
+    case 'part-wiggle':
+      return testJoint();
+  }
+});
+partsPanel.addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement;
+  const pt = activePart();
+  if (el.id === 'parts-dim') {
+    state.dimOthers = el.checked;
+    return renderCanvas();
+  }
+  if (el.id === 'part-name') {
+    checkpoint();
+    pt.name = el.value.trim() || pt.name;
+  } else if (el.id === 'part-parent') {
+    checkpoint();
+    pt.parent = el.value || null;
+  } else if (el.id === 'part-z') {
+    checkpoint();
+    pt.z = Math.round((+el.value || 0) * 2) / 2;
+  } else return;
+  el.blur();
+  renderAll();
+});
+
 // ---------- 3D ----------
 
 type ViewMode = '2d' | 'split' | '3d';
@@ -983,7 +1293,7 @@ let timer3d = 0;
 function schedule3d() {
   clearTimeout(timer3d);
   timer3d = window.setTimeout(() => {
-    if (viewMode !== '2d') preview3d.update(composite());
+    if (viewMode !== '2d') preview3d.update(composite(), liveParts(), state.parts.length > 1 ? activePart().id : undefined);
   }, 30);
 }
 
@@ -1022,7 +1332,7 @@ const modelOpts = () => ({
 });
 
 function renderStats() {
-  const p = composite();
+  const p = flat();
   const unit = $<HTMLSelectElement>('model-scale').value === 'fit' ? 1 / Math.max(p.size.x, p.size.y) : 1;
   let front = 0;
   let back = 0;
@@ -1042,19 +1352,19 @@ $('btn-export-model').addEventListener('click', async () => {
   try {
     const opts = modelOpts();
     if ($<HTMLSelectElement>('model-format').value === 'glb') {
-      const res = await platform.saveFile(await exportGlb(state.project, opts), `${safeName()}.glb`, FORMATS.glb);
+      const res = await platform.saveFile(await exportGlb(state.project, opts, state.parts), `${safeName()}.glb`, FORMATS.glb);
       if (res) flash(`Exported ${res.name}`);
     } else if (platform.isDesktop) {
       const path = await platform.pickSavePath(`${safeName()}.obj`, FORMATS.obj, state.file?.path);
       if (path) {
         const mtlPath = platform.stripExt(path) + '.mtl';
-        const { obj, mtl } = exportObj(state.project, platform.basename(mtlPath), opts);
+        const { obj, mtl } = exportObj(state.project, platform.basename(mtlPath), opts, state.parts);
         await platform.writePath(path, obj);
         await platform.writePath(mtlPath, mtl);
         flash(`Exported ${platform.basename(path)} and ${platform.basename(mtlPath)}`);
       }
     } else {
-      const { obj, mtl } = exportObj(state.project, `${safeName()}.mtl`, opts);
+      const { obj, mtl } = exportObj(state.project, `${safeName()}.mtl`, opts, state.parts);
       // the .obj refers to the .mtl by name, so both go to the downloads folder side by side
       platform.download(new Blob([obj], { type: 'text/plain' }), `${safeName()}.obj`);
       platform.download(new Blob([mtl], { type: 'text/plain' }), `${safeName()}.mtl`);
@@ -1086,7 +1396,7 @@ const safeName = () => state.project.title.replace(/[^\w\- ]+/g, '').trim() || '
 async function save(as = false) {
   commitFloat();
   try {
-    const blob = await writeKenshape(withAutoExport(state.project, state.autoExport));
+    const blob = await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active));
     const prevPath = state.file?.path;
     const res = await platform.saveFile(blob, `${safeName()}.kenshape`, KENSHAPE, as ? null : state.file);
     if (!res) return;
@@ -1094,7 +1404,7 @@ async function save(as = false) {
     // files when Save as moves the project to another folder
     if (prevPath && res.path && prevPath !== res.path && state.autoExport.targets.length) {
       for (const t of state.autoExport.targets) t.path = storePath(res.path, targetAbsPath(prevPath, t));
-      await platform.writePath(res.path, await writeKenshape(withAutoExport(state.project, state.autoExport)));
+      await platform.writePath(res.path, await writeKenshape(withRig(withAutoExport(state.project, state.autoExport), state.parts, state.active)));
     }
     state.file = res;
     state.dirty = false;
@@ -1111,7 +1421,7 @@ async function exportOnSave(force = false): Promise<string> {
   const cfg = state.autoExport;
   const path = state.file?.path;
   if (!platform.isDesktop || !path || !cfg.targets.length || (!cfg.enabled && !force)) return '';
-  const res = await runAutoExport(state.project, path, cfg);
+  const res = await runAutoExport(state.project, state.parts, path, cfg);
   if (res.errors.length) return ` · export failed: ${res.errors.join('; ')}`;
   return ` · exported ${res.written.length} file${res.written.length === 1 ? '' : 's'}`;
 }
@@ -1304,7 +1614,7 @@ $('png-crisp').addEventListener('change', renderPreview);
 $('btn-export-svg').addEventListener('click', async () => {
   commitFloat();
   const grouping = $<HTMLSelectElement>('svg-grouping').value as SvgGrouping;
-  const svg = exportSvg(state.project, { grouping, width: state.project.size.x * 16, height: state.project.size.y * 16 });
+  const svg = exportSvg(flat(), { grouping, width: state.project.size.x * 16, height: state.project.size.y * 16 });
   const res = await platform.saveFile(new Blob([svg], { type: 'image/svg+xml' }), `${safeName()}.svg`, SVG);
   if (res) flash(`Exported ${res.name}`);
   renderAll();
@@ -1312,7 +1622,7 @@ $('btn-export-svg').addEventListener('click', async () => {
 $('btn-export-png').addEventListener('click', async () => {
   commitFloat();
   const size = pngSize();
-  const blob = await exportPng(state.project, size, size, { crisp: $<HTMLInputElement>('png-crisp').checked });
+  const blob = await exportPng(flat(), size, size, { crisp: $<HTMLInputElement>('png-crisp').checked });
   const res = await platform.saveFile(blob, `${safeName()}.png`, FORMATS.png);
   if (res) flash(`Exported ${res.name} (${size}×${size})`);
   renderAll();
@@ -1357,6 +1667,7 @@ window.addEventListener('keydown', (e) => {
     else if (k === 'c') copySelection();
     else if (k === 'x') copySelection(true);
     else if (k === 'v') paste();
+    else if (k === 'j') partFromSelection();
     else return;
     e.preventDefault();
     return;

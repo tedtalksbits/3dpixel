@@ -95,3 +95,28 @@ editor's SVG import does first.
 `color`). `path` is relative to the `.kenshape` file, with forward slashes, or absolute if it's on
 another drive. Unity's JsonUtility ignores unknown keys, so Kenney Shape still opens the file, but
 it doesn't keep the key when it saves.
+
+## 3dpixel extension: `rig`
+
+A drawing split into parts keeps them under an extra top-level key. The normal `tiles` hold the
+flattened drawing, with the front-most part winning each cell, so Kenney Shape opens the file
+unchanged. As with `autoExport`, Kenney Shape drops the key if it saves the file.
+
+```json
+"rig": {
+  "version": 1,
+  "active": 4,
+  "parts": [
+    { "id": "body", "name": "Body", "pivot": [8, 8], "z": 0, "parent": null, "visible": true,
+      "tiles": [[101, { "shape": 0, "angle": 0, "color": 11, "depth": 2, "colorBack": -1, "depthBack": 0 }]] },
+    { "id": "p1a2b3", "name": "Arm", "pivot": [10.5, 5], "z": 0, "parent": "body", "visible": true, "tiles": [] }
+  ]
+}
+```
+
+- `tiles` is sparse: pairs of `[index, tile]`, using the same column-major index as the main grid.
+- `pivot` is in tile units from the top-left, with y pointing down.
+- `z` is in tiles, scaled by `depthMultiplier` like depth. Negative means behind.
+- `visible` only affects the editor. Hidden parts are still exported.
+- In GLB export, each part is a node placed at its pivot, relative to its parent's pivot, with its
+  meshes offset so they rotate about it.

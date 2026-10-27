@@ -98,6 +98,17 @@
       </section>
 
       <aside class="panel right">
+        <section id="parts-panel">
+          <h2>Parts <label class="hint check-inline" title="Fade the parts you're not editing"><input type="checkbox" id="parts-dim" checked /> Dim others</label></h2>
+          <div id="parts" class="parts"></div>
+          <div class="btn-grid">
+            <button id="part-from-sel" title="Move the selected tiles into a new part (Ctrl+J)">From selection</button>
+            <button id="part-new" title="Add an empty part">+ Empty</button>
+            <button id="part-far" title="Copy this part behind the body with darker colours, for the far arm or leg">Far copy</button>
+            <button id="part-delete" title="Delete this part and its tiles">Delete</button>
+          </div>
+          <div id="part-props" class="part-props"></div>
+        </section>
         <section id="selection-panel" class="selection-panel hidden">
           <h2>Selection <span id="sel-count" class="hint"></span></h2>
           <div class="btn-grid">
