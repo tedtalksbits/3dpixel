@@ -154,6 +154,25 @@ export async function generateImage(o: GenerateOptions): Promise<{ image: Blob; 
   return { image: fromBase64(r.image.base64, r.image.format), usage: r.usage };
 }
 
+/** Sizes the rotate model takes. */
+export const ROTATE_SIZES = [16, 32, 64, 128];
+
+/**
+ * The same subject turned to face another way (1 generation). `sprite` must be square, one of
+ * ROTATE_SIZES; the result is the same size.
+ */
+export async function rotateImage(sprite: Blob, size: number, from: Direction, to: Direction, view: View = 'side'): Promise<{ image: Blob; usage?: Usage }> {
+  const r = await call<{ image: { base64: string; format?: string }; usage?: Usage }>('POST', '/rotate', {
+    image_size: { width: size, height: size },
+    from_image: await image(sprite),
+    from_direction: from,
+    to_direction: to,
+    from_view: view,
+    to_view: view,
+  });
+  return { image: fromBase64(r.image.base64, r.image.format), usage: r.usage };
+}
+
 /** The 18 joints of a character (0.1 generations). Images up to 256×256. */
 export async function estimateSkeleton(sprite: Blob): Promise<{ keypoints: Keypoint[]; usage?: Usage }> {
   return call('POST', '/estimate-skeleton', { image: await image(sprite) });

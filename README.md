@@ -230,6 +230,19 @@ other browsers download a copy instead.
     part is about as deep as the body is wide, so a character reads as a solid figure rather than a
     cut-out. Flat depth gives every tile the same depth.
   - Use the PNG import panel, Open, or drag an image onto the window. GIF, WebP and BMP work too.
+- **Give models a back and real depth** (Back and depth panel): by default the back mirrors the
+  front, which suits flat things like tools. For characters and objects:
+  - **Back:** colour it from a back-view image (mirrored, since left and right swap from behind),
+    have PixelLab turn the drawing around (1 generation), or Simplify it, which keeps the big
+    colour areas and drops details like faces and logos. Same as front puts the mirror back.
+  - **Depth from the side:** a side-view image, or PixelLab turning the drawing to the side
+    (1 generation), sets how far each row reaches forwards and backwards, rounding off across the
+    row. A cap gets a deep brim and a shallow crown instead of a lens shape. The depth multiplier
+    goes up if the subject is deeper than the tile depth limit allows.
+  - **Paint the back by hand:** set Canvas shows to Back colours, and Draw, Fill and Pick work on
+    the back of tiles.
+  - When generating, tick "Also make the back and side" to do both in one go (2 more generations).
+    Turning works on drawings that face you, up to 128×128.
 
 ## Controls
 
@@ -287,8 +300,9 @@ You can also drop a `.kenshape` or `.svg` file onto the canvas. In the desktop a
 - `src/presets.ts`: animation presets that generate keyframe tracks
 - `src/templates.ts`: rig templates, roles and role guessing
 - `src/creatures.ts`: biped, four-legged and shell creature presets
-- `src/pixellab.ts`: PixelLab API client: image generation, skeleton estimation, balance
+- `src/pixellab.ts`: PixelLab API client: image generation, rotation, skeleton estimation, balance
 - `src/autoRig.ts`: splits a drawing into biped parts from a skeleton
+- `src/views.ts`: back colours and side-view depth from extra views of the subject
 - `src/secrets.ts`: API key storage (system keychain on desktop, localStorage on the web)
 - `src/dopesheet.ts`: the dope sheet
 - `src/curveEditor.ts`: the ease curve editor

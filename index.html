@@ -79,6 +79,7 @@
               <option value="off">Colours</option>
               <option value="numbers">Colours + depth numbers</option>
               <option value="map">Depth map</option>
+              <option value="back">Back colours (paint the back)</option>
             </select>
           </label>
           <p class="hint">The Depth tool (D) shows the depth map while it's active.</p>
@@ -166,7 +167,7 @@
           <h2>3D model</h2>
           <label>Depth scale
             <span class="row tight">
-              <input id="depth-mult" type="range" min="10" max="300" step="10" value="100" />
+              <input id="depth-mult" type="range" min="10" max="600" step="10" value="100" />
               <span id="depth-mult-label" class="mono">100%</span>
             </span>
           </label>
@@ -256,6 +257,7 @@
             </label>
           </div>
           <label class="check" title="Pixflux only: generate with the current palette's colours"><input type="checkbox" id="gen-palette" /> Use the current palette</label>
+          <label class="check" title="PixelLab turns the sprite around and to the side: the back gets its own colours and the depth follows the side view"><input type="checkbox" id="gen-views" /> Also make the back and side (2 more generations)</label>
           <label class="check" title="Find the skeleton and split the sprite into body, head, arms and legs, ready for the biped presets"><input type="checkbox" id="gen-rig" /> Auto-rig as a two-legged character</label>
           <button id="btn-generate" class="wide primary">Generate</button>
           <p class="hint" id="gen-status"></p>
@@ -313,6 +315,30 @@
           <label class="check"><input type="checkbox" id="png-trim" checked /> Trim transparent edges</label>
           <p class="hint">For pixel art: each pixel becomes a square tile. Scaled-up sprites are detected and sampled back to their real pixels. Rounded depth makes the middle of the shape thicker than its edges.</p>
           <button id="btn-import-png" class="wide">Import PNG…</button>
+        </section>
+        <section id="views-panel">
+          <h2>Back and depth</h2>
+          <p class="hint">The back mirrors the front, which suits flat things like tools. Characters and objects look better with a back of their own and depth taken from the side.</p>
+          <span class="label">Back</span>
+          <div class="btn-grid">
+            <button id="back-generate" title="PixelLab turns the drawing around and its back view colours the back (1 generation). Works on drawings that face you.">Generate</button>
+            <button id="back-image" title="Colour the back from a picture of the subject from behind">From image…</button>
+            <button id="back-simple" title="Each tile takes the commonest colour around it, so faces and logos drop out">Simplify</button>
+            <button id="back-same" title="Make the back mirror the front again">Same as front</button>
+          </div>
+          <span class="label">Depth from the side</span>
+          <div class="btn-grid">
+            <button id="side-generate" title="PixelLab turns the drawing to the side and the depth follows its outline (1 generation). Works on drawings that face you.">Generate</button>
+            <button id="side-image" title="Take the depth from a picture of the subject side-on">From image…</button>
+          </div>
+          <label>Side image faces
+            <select id="side-faces">
+              <option value="right" selected>Right</option>
+              <option value="left">Left</option>
+            </select>
+          </label>
+          <p class="hint" id="views-status"></p>
+          <p class="hint">To paint the back by hand, set Canvas shows to Back colours: Draw, Fill and Pick then work on the back.</p>
         </section>
       </aside>
     </main>

@@ -132,8 +132,19 @@ export function insideDistance(k: Int32Array, w: number, h: number): Float32Arra
   return d;
 }
 
-export function pixelsToProject(px: Pixels, opts: PngImportOptions): PngImportResult {
-  const notes: string[] = [];
+/** Opaque pixel keys at one entry per art pixel, with transparent margins trimmed. */
+export interface Art {
+  k: Int32Array; // RGB as a number, -1 = transparent; row-major
+  w: number;
+  h: number;
+}
+
+/** The art behind an image: scaled-up pixel art sampled back down, and trimmed to its silhouette. */
+export function artOf(px: Pixels): Art {
+  return toArt(px, true, []);
+}
+
+function toArt(px: Pixels, trim: boolean, notes: string[]): Art {
   const full = keys(px);
   const { scale, ox, oy } = detectScale(full, px.width, px.height);
 
@@ -143,7 +154,7 @@ export function pixelsToProject(px: Pixels, opts: PngImportOptions): PngImportRe
   let k = scale > 1 ? resample(full, px.width, px.height, ox, oy, scale, scale, w, h) : full;
   if (scale > 1) notes.push(`Detected ${scale}× scaled pixel art.`);
 
-  if (opts.trim) {
+  if (trim) {
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++)
@@ -156,6 +167,12 @@ export function pixelsToProject(px: Pixels, opts: PngImportOptions): PngImportRe
       h = th;
     }
   }
+  return { k, w, h };
+}
+
+export function pixelsToProject(px: Pixels, opts: PngImportOptions): PngImportResult {
+  const notes: string[] = [];
+  let { k, w, h } = toArt(px, opts.trim, notes);
 
   const limit = opts.size === 'pixel' ? PNG_MAX : Math.max(1, Math.min(PNG_MAX, Math.round(opts.size)));
   if (w > limit || h > limit) {
@@ -219,8 +236,8 @@ export function pixelsToProject(px: Pixels, opts: PngImportOptions): PngImportRe
   return { project: p, notes };
 }
 
-/** Decode an image file (PNG, GIF's first frame, WebP, …) and convert it. */
-export async function importPng(blob: Blob, opts: PngImportOptions): Promise<PngImportResult> {
+/** Decode an image file (PNG, GIF's first frame, WebP, …) to RGBA pixels. */
+export async function decodeImage(blob: Blob): Promise<Pixels> {
   let bmp: ImageBitmap;
   try {
     bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
@@ -234,5 +251,10 @@ export async function importPng(blob: Blob, opts: PngImportOptions): Promise<Png
   ctx.drawImage(bmp, 0, 0);
   bmp.close();
   const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
-  return pixelsToProject({ data, width, height }, opts);
+  return { data, width, height };
+}
+
+/** Decode an image file and convert it. */
+export async function importPng(blob: Blob, opts: PngImportOptions): Promise<PngImportResult> {
+  return pixelsToProject(await decodeImage(blob), opts);
 }

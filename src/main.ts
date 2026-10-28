@@ -3,8 +3,9 @@ import { Project, Tile, newProject, getTile, readKenshape, writeKenshape, cloneP
 import { SHAPES } from './shapes';
 import { TILE, exportSvg, exportPng, tilePath, SvgGrouping } from './svgExport';
 import { importSvg, PaletteMode } from './svgImport';
-import { importPng, PngDepth } from './pngImport';
-import { generateImage, estimateSkeleton, getBalance, balanceText, usageText, KEY_NAME, Model, View, Direction, Outline, Detail } from './pixellab';
+import { importPng, PngDepth, decodeImage, artOf, Art } from './pngImport';
+import { Grid, backFromArt, simpleBack, depthFromSide } from './views';
+import { generateImage, estimateSkeleton, rotateImage, ROTATE_SIZES, Usage, getBalance, balanceText, usageText, KEY_NAME, Model, View, Direction, Outline, Detail } from './pixellab';
 import { autoRig } from './autoRig';
 import { getSecret } from './secrets';
 import { Preview3D } from './preview3d';
@@ -31,7 +32,7 @@ import { Part, noTemplate, basePart, drawOrder, flattenTiles, takeRig, withRig, 
 
 type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
 type DepthMode = 'set' | 'raise' | 'lower';
-type DepthView = 'off' | 'numbers' | 'map';
+type DepthView = 'off' | 'numbers' | 'map' | 'back';
 type WandMatch = 'color' | 'colorDepth' | 'tile';
 
 const DEPTH_MIN = 1;
@@ -413,6 +414,10 @@ function paintTile(x: number, y: number, erase: boolean) {
     Object.assign(t, { shape: state.shape, angle: state.angle, color: state.color, depth: state.depth, colorBack: -1, depthBack: 0 });
     return;
   }
+  if (paintingBack()) {
+    if (state.apply.color) t.colorBack = state.color;
+    return;
+  }
   if (state.apply.shape) Object.assign(t, { shape: state.shape, angle: state.angle });
   if (state.apply.color) t.color = state.color;
   if (state.apply.depth) t.depth = state.depth;
@@ -433,6 +438,10 @@ function pick(x: number, y: number) {
   if (!inBounds(x, y)) return;
   const t = getTile(composite(), x, y);
   if (t.color < 0) return;
+  if (paintingBack()) {
+    state.color = backColor(t);
+    return flash(`Picked the back colour ${state.project.colors[state.color]}`);
+  }
   Object.assign(state, { shape: t.shape, angle: t.angle, color: t.color, depth: clampDepth(tileDepths(t.depth, 0)[0]) });
   flash(`Picked ${SHAPES[t.shape]?.name ?? 'shape'}, ${state.project.colors[t.color]}, depth ${state.depth}`);
 }
@@ -442,8 +451,20 @@ function sameTile(a: Tile, b: Tile) {
   return a.color === b.color && a.shape === b.shape && a.angle === b.angle;
 }
 
+/** "Canvas shows: back colours": the tools paint the back of tiles instead of the front. */
+const paintingBack = () => effectiveDepthView() === 'back';
+const backColor = (t: Tile) => (t.colorBack >= 0 ? t.colorBack : t.color);
+
 function fill(x: number, y: number) {
   const start = { ...getTile(state.project, x, y) };
+  if (paintingBack()) {
+    if (start.color < 0) return;
+    for (const k of regionFrom(x, y, (t) => t.color >= 0 && backColor(t) === backColor(start), state.fillContiguous, state.sel)) {
+      const [cx, cy] = unpack(k);
+      getTile(state.project, cx, cy).colorBack = state.color;
+    }
+    return;
+  }
   for (const k of regionFrom(x, y, (t) => sameTile(t, start), state.fillContiguous, state.sel)) {
     const [cx, cy] = unpack(k);
     const t = getTile(state.project, cx, cy);
@@ -519,13 +540,14 @@ function renderCanvas() {
       for (let y = 0; y < p.size.y; y++) {
         const t = part.tiles[tileIndex(p, x, y)];
         if (t.color < 0) continue;
+        const c = p.colors[view === 'back' ? backColor(t) : t.color];
         if (!isActive) {
-          layer += `<path fill="${p.colors[t.color]}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
+          layer += `<path fill="${c}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
           continue;
         }
         const d = tileDepths(t.depth, 0)[0];
-        layer += `<path fill="${view === 'map' ? depthFill(d) : p.colors[t.color]}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
-        if (view !== 'off' && tilePx >= 14)
+        layer += `<path fill="${view === 'map' ? depthFill(d) : c}" d="${tilePath(x, y, t.shape, t.angle)}"/>`;
+        if ((view === 'numbers' || view === 'map') && tilePx >= 14)
           numbers += `<text x="${x * TILE + 16}" y="${y * TILE + 21}">${d}</text>`;
       }
     }
@@ -2459,6 +2481,128 @@ async function doImportPng(blob: Blob, name: string, quiet = false) {
   return res;
 }
 
+// ---------- back and side views ----------
+
+const viewsStatus = (msg: string, error = false) => {
+  const el = $('views-status');
+  el.textContent = msg;
+  el.classList.toggle('error', error);
+};
+
+function flatGrid(): Grid {
+  commitFloat();
+  const p = state.project;
+  return { W: p.size.x, H: p.size.y, tiles: flattenTiles(p, state.parts) };
+}
+
+/** Change the tiles at these indices in every part that has one there. */
+function editTiles(indices: Iterable<number>, fn: (t: Tile, i: number) => void) {
+  for (const i of indices) for (const part of state.parts) if (part.tiles[i].color >= 0) fn(part.tiles[i], i);
+}
+
+/** Set the back colours, or with null make the back mirror the front again. */
+function setBack(colorBack: Map<number, number> | null, colors = state.project.colors) {
+  checkpoint();
+  state.project.colors = colors;
+  if (colorBack) editTiles(colorBack.keys(), (t, i) => (t.colorBack = colorBack.get(i)!));
+  else for (const part of state.parts) for (const t of part.tiles) t.colorBack = -1;
+  renderAll();
+}
+
+function applyBackArt(art: Art): string[] {
+  const res = backFromArt(flatGrid(), state.project.colors, art, PALETTE_MAX);
+  setBack(res.colorBack, res.colors);
+  return ['Gave the back its own colours.', ...res.notes];
+}
+
+function applySideArt(art: Art, faces: 'right' | 'left'): string[] {
+  const res = depthFromSide(flatGrid(), art, faces);
+  checkpoint();
+  editTiles(res.depth.keys(), (t, i) => ([t.depth, t.depthBack] = res.depth.get(i)!));
+  state.project.depthMultiplier = res.multiplier;
+  renderAll();
+  return res.notes;
+}
+
+async function pickImage(): Promise<Blob | null> {
+  if (platform.canPickFile) return (await platform.pickFile([IMAGE]))?.file ?? null;
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.png,.gif,.webp,.bmp';
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.click();
+  });
+}
+
+/**
+ * PixelLab turns the drawing to face `to` (1 generation). The drawing should face the viewer; it's
+ * sent cropped to its outline and centred on the smallest square the rotate model takes.
+ */
+async function turnDrawing(to: Direction): Promise<{ art: Art; usage?: Usage }> {
+  const g = flatGrid();
+  let x0 = g.W, y0 = g.H, x1 = -1, y1 = -1;
+  for (let x = 0; x < g.W; x++)
+    for (let y = 0; y < g.H; y++)
+      if (g.tiles[x * g.H + y].color >= 0) (x0 = Math.min(x0, x)), (y0 = Math.min(y0, y)), (x1 = Math.max(x1, x)), (y1 = Math.max(y1, y));
+  if (x1 < 0) throw new Error('Draw or import something first.');
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const size = ROTATE_SIZES.find((n) => n >= Math.max(w, h));
+  if (!size) throw new Error(`PixelLab turns sprites up to ${ROTATE_SIZES.at(-1)}×${ROTATE_SIZES.at(-1)}; this one is ${w}×${h}.`);
+  const sq = newProject(size, size);
+  sq.colors = state.project.colors;
+  const ox = Math.floor((size - w) / 2), oy = Math.floor((size - h) / 2);
+  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) sq.tiles[(ox + x) * size + oy + y] = g.tiles[(x0 + x) * g.H + y0 + y];
+  const { image, usage } = await rotateImage(await exportPng(sq, size, size, { crisp: true }), size, 'south', to);
+  return { art: artOf(await decodeImage(image)), usage };
+}
+
+/** Run a back or side action with its button disabled, reporting under the buttons. */
+async function viewAction(btn: HTMLButtonElement, busy: string, run: () => Promise<string[] | null>) {
+  btn.disabled = true;
+  viewsStatus(busy);
+  try {
+    const notes = await run();
+    viewsStatus(notes ? notes.join(' ') : '');
+  } catch (err: any) {
+    viewsStatus(err?.message ?? String(err), true);
+  } finally {
+    btn.disabled = false;
+    refreshPixelLab();
+  }
+}
+
+$('views-panel').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null;
+  if (!btn) return;
+  switch (btn.id) {
+    case 'back-generate':
+      return viewAction(btn, 'Turning the drawing around… (about 10–30 seconds)', async () => {
+        const { art, usage } = await turnDrawing('north');
+        return [...applyBackArt(art), `Used ${usageText(usage)}.`];
+      });
+    case 'back-image':
+      return viewAction(btn, '', async () => {
+        const blob = await pickImage();
+        return blob ? applyBackArt(artOf(await decodeImage(blob))) : null;
+      });
+    case 'back-simple':
+      return viewAction(btn, '', async () => (setBack(simpleBack(flatGrid())), ['Simplified the back: small details like faces and logos are gone.']));
+    case 'back-same':
+      return viewAction(btn, '', async () => (setBack(null), ['The back mirrors the front again.']));
+    case 'side-generate':
+      return viewAction(btn, 'Turning the drawing to the side… (about 10–30 seconds)', async () => {
+        const { art, usage } = await turnDrawing('east');
+        return [...applySideArt(art, 'right'), `Used ${usageText(usage)}.`];
+      });
+    case 'side-image':
+      return viewAction(btn, '', async () => {
+        const blob = await pickImage();
+        return blob ? applySideArt(artOf(await decodeImage(blob)), $<HTMLSelectElement>('side-faces').value as 'right' | 'left') : null;
+      });
+  }
+});
+
 // ---------- PixelLab: generate and auto-rig ----------
 
 const genStatus = (msg: string, error = false) => {
@@ -2470,7 +2614,7 @@ const genStatus = (msg: string, error = false) => {
 /** Show the balance, or how to add a key, under the Generate button. */
 async function refreshPixelLab() {
   const key = await getSecret(KEY_NAME).catch(() => null);
-  $<HTMLButtonElement>('btn-generate').disabled = !key;
+  for (const id of ['btn-generate', 'back-generate', 'side-generate']) $<HTMLButtonElement>(id).disabled = !key;
   if (!key) {
     $('gen-status').innerHTML = `Add your PixelLab API key in <button class="link" id="gen-settings">Settings</button> to generate sprites.`;
     return;
@@ -2507,6 +2651,12 @@ async function generate() {
     });
     const imported = await doImportPng(image, promptName(prompt), true);
     const notes = [`Generated for ${usageText(usage)}.`, ...imported.notes];
+    if ($<HTMLInputElement>('gen-views').checked) {
+      genStatus('Turning it around for the back…');
+      notes.push(...applyBackArt((await turnDrawing('north')).art));
+      genStatus('Turning it to the side for the depth…');
+      notes.push(...applySideArt((await turnDrawing('east')).art, 'right'));
+    }
     if ($<HTMLInputElement>('gen-rig').checked) {
       genStatus('Finding the skeleton…');
       notes.push(...(await rigFromSkeleton()));
