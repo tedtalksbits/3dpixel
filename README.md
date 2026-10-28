@@ -238,7 +238,7 @@ other browsers download a copy instead.
   - **Depth from the side:** a side-view image, or PixelLab turning the drawing to the side
     (1 generation), sets how far each row reaches forwards and backwards, rounding off across the
     row. A cap gets a deep brim and a shallow crown instead of a lens shape. The depth multiplier
-    goes up if the subject is deeper than the tile depth limit allows.
+    goes up to 150% for deep subjects; deeper ones are squashed front to back so the depth steps stay small. Each tile's side walls take its back colour on the back half, so the front colours don't streak all the way round.
   - **Paint the back by hand:** set Canvas shows to Back colours, and Draw, Fill and Pick work on
     the back of tiles.
   - When generating, tick "Also make the back and side" to do both in one go (2 more generations).

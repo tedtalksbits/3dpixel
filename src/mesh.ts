@@ -6,7 +6,9 @@ import { TILE } from './svgExport';
 // Builds an extruded model the same way Kenney Shape does: one tile = 1 unit, the grid is
 // centred on the origin, +Y is up and +Z faces the viewer. A tile reaches depth/2 towards
 // the front and depthBack/2 towards the back (depthBack 0 = same as depth), scaled by
-// depthMultiplier. The back face uses colorBack when it is set.
+// depthMultiplier. The back face uses colorBack when it is set, and so does the back half of the
+// tile's side walls, so a tile with its own back colour doesn't streak its front colour all the
+// way round.
 
 export interface MeshPart {
   color: number; // palette index
@@ -91,6 +93,7 @@ interface Side {
   zf: number;
   zb: number;
   color: number;
+  colorBack: number;
   hidden: boolean;
 }
 
@@ -139,7 +142,7 @@ export function buildModel(p: Project, opts: ModelOptions = {}): MeshPart[] {
       for (const [a, b, c] of tris) back.indices.push(base + a, base + c, base + b);
 
       for (let i = 0; i < pts.length; i++) {
-        sides.push({ a: pts[i], b: pts[(i + 1) % pts.length], zf, zb, color: t.color, hidden: false });
+        sides.push({ a: pts[i], b: pts[(i + 1) % pts.length], zf, zb, color: t.color, colorBack: t.colorBack >= 0 ? t.colorBack : t.color, hidden: false });
       }
     }
   }
@@ -169,11 +172,15 @@ export function buildModel(p: Project, opts: ModelOptions = {}): MeshPart[] {
     if (len < 1e-9) continue;
     const nx = (by - ay) / len; // outward normal of a counter-clockwise outline
     const ny = -(bx - ax) / len;
-    const m = part(s.color);
-    const base = m.positions.length / 3;
-    m.positions.push(ax, ay, s.zf, bx, by, s.zf, bx, by, s.zb, ax, ay, s.zb);
-    for (let i = 0; i < 4; i++) m.normals.push(nx, ny, 0);
-    m.indices.push(base, base + 3, base + 2, base, base + 2, base + 1);
+    const wall = (color: number, zf: number, zb: number) => {
+      const m = part(color);
+      const base = m.positions.length / 3;
+      m.positions.push(ax, ay, zf, bx, by, zf, bx, by, zb, ax, ay, zb);
+      for (let i = 0; i < 4; i++) m.normals.push(nx, ny, 0);
+      m.indices.push(base, base + 3, base + 2, base, base + 2, base + 1);
+    };
+    if (s.colorBack === s.color) wall(s.color, s.zf, s.zb);
+    else wall(s.color, s.zf, 0), wall(s.colorBack, 0, s.zb);
   }
 
   return [...parts.values()].sort((a, b) => a.color - b.color);

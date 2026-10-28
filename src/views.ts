@@ -7,8 +7,9 @@
 //   back can be simplified instead: each tile takes the commonest colour around it, which keeps the
 //   big areas (hair, a shirt) and drops small details like eyes and logos.
 // - The depth: a side-view image gives how far the subject reaches forwards and backwards at each
-//   height, so a cap gets a deep brim and a shallow crown. Across each row the depth rounds off
-//   towards the edges like an ellipse, so the result reads as a solid rather than a stack of slabs.
+//   height, so a cap gets a deep brim and a shallow crown. Each piece of a row (a leg, a fist) is
+//   kept no deeper than it is wide, since the side view can't say which piece is deep, and rounds
+//   off towards its edges like an ellipse, so the result reads as a solid rather than slabs.
 //
 // Images are lined up with the drawing by their silhouettes' bounding boxes, so they don't need to
 // be the same size as the drawing, only the same subject.
@@ -26,6 +27,10 @@ export interface Grid {
 
 /** The editor's deepest tile. */
 const DEPTH_LIMIT = 20;
+/** The biggest depth multiplier (percent) side depth sets; deeper subjects are squashed instead. */
+const MAX_MULTIPLIER = 150;
+/** A piece of a row reaches at most this many times its half-width forwards and back. */
+const RUN_DEPTH = 1;
 
 interface Box {
   x0: number;
@@ -189,10 +194,14 @@ export function depthFromSide(g: Grid, side: Art, faces: 'right' | 'left'): Dept
       let e = x;
       while (e + 1 <= b.x1 && g.tiles[(e + 1) * g.H + y].color >= 0) e++;
       const c = (x + e + 1) / 2, hw = (e - x + 1) / 2;
+      // the side view's reach is the whole row's: a leg sharing a row with a fist only gets as
+      // deep as it is wide, and the row's lean forwards or back stays within the piece
+      const h = Math.min(half, hw * RUN_DEPTH);
+      const m = Math.max(-0.8 * h, Math.min(0.8 * h, mid));
       for (let t = x; t <= e; t++) {
         const u = (t + 0.5 - c) / hw;
-        const k = half * Math.sqrt(Math.max(0, 1 - u * u));
-        const f = Math.max(0.25, mid + k), bk = Math.max(0.25, k - mid);
+        const r = Math.sqrt(Math.max(0, 1 - u * u));
+        const f = Math.max(0.25, (m + h) * r), bk = Math.max(0.25, (h - m) * r);
         reach.set(t * g.H + y, [f, bk]);
         most = Math.max(most, f, bk);
         deepest = Math.max(deepest, f + bk);
@@ -201,13 +210,17 @@ export function depthFromSide(g: Grid, side: Art, faces: 'right' | 'left'): Dept
     }
   }
 
-  // a tile of depth d reaches d/2 × multiplier; deep subjects need a bigger multiplier to fit
-  const multiplier = Math.max(100, Math.ceil(((most * 2) / DEPTH_LIMIT) * 10) * 10);
+  // a tile of depth d reaches d/2 × multiplier. Deep subjects get a bigger multiplier, up to a
+  // point: past it each depth step is a tall wall, so the subject is squashed front to back instead
+  const needed = Math.max(100, Math.ceil(((most * 2) / DEPTH_LIMIT) * 10) * 10);
+  const multiplier = Math.min(MAX_MULTIPLIER, needed);
   const unit = multiplier / 100;
-  const toDepth = (v: number) => Math.max(1, Math.min(DEPTH_LIMIT, Math.round((v * 2) / unit)));
+  const squash = multiplier / needed;
+  const toDepth = (v: number) => Math.max(1, Math.min(DEPTH_LIMIT, Math.round((v * squash * 2) / unit)));
   const depth = new Map<number, [number, number]>();
   for (const [i, [f, bk]] of reach) depth.set(i, [toDepth(f), toDepth(bk)]);
-  const notes = [`Carved the depth from the side view: ${+deepest.toFixed(1)} tiles front to back at the deepest.`];
-  if (multiplier > 100) notes.push(`Depth multiplier set to ${multiplier}% to fit.`);
+  const notes = [`Carved the depth from the side view: ${+(deepest * squash).toFixed(1)} tiles front to back at the deepest.`];
+  if (squash < 1) notes.push(`Squashed to ${Math.round(squash * 100)}% front to back to keep the depth steps small.`);
+  if (multiplier > 100) notes.push(`Depth multiplier set to ${multiplier}%.`);
   return { depth, multiplier, notes };
 }
