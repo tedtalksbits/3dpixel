@@ -72,7 +72,8 @@ other browsers download a copy instead.
   - A depth-map view shades tiles by thickness and shows their numbers.
   - `[` and `]` change the depth of the selection, or of the brush when nothing is selected.
 - **Selections, Photoshop-style:**
-  - Select with a rectangle or the magic wand.
+  - Select with a rectangle, the magic wand, or Paint select (L), which paints any shape into the
+    selection with a 1, 2, 3 or 5 tile brush. Alt or right-drag paints it back out.
   - Move by dragging or with the arrow keys. With nothing selected, Move shifts the whole drawing.
   - Copy, cut, paste and delete.
   - Recolour, reshape, change depth, rotate or flip selected tiles in bulk. Rotating and flipping
@@ -248,7 +249,7 @@ other browsers download a copy instead.
 
 | Input | Action |
 | --- | --- |
-| V / M / W | Move / Select / Magic wand |
+| V / M / L / W | Move / Select / Paint select / Magic wand |
 | B / E / G / D / I | Draw / Erase / Fill / Depth / Pick |
 | P | Pivot (place the selected part's pivot) |
 | Ctrl+J | Make a part from the selection |

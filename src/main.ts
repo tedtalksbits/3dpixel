@@ -30,7 +30,7 @@ import { PRESETS, PRESET_LIST, PresetDef, PresetId, PresetUse, PivotSpot, addPre
 import { RigTemplate, TemplateKind, Facing, TEMPLATES, rigCtx, guessRoles, roleLabel } from './templates';
 import { Part, noTemplate, basePart, drawOrder, flattenTiles, takeRig, withRig, autoPivot, wouldCycle, treeOrder, emptyGrid, newPartId } from './rig';
 
-type Tool = 'move' | 'select' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
+type Tool = 'move' | 'select' | 'paintSel' | 'wand' | 'draw' | 'erase' | 'fill' | 'depth' | 'pick' | 'pivot';
 type DepthMode = 'set' | 'raise' | 'lower';
 type DepthView = 'off' | 'numbers' | 'map' | 'back';
 type WandMatch = 'color' | 'colorDepth' | 'tile';
@@ -97,6 +97,7 @@ const state = {
   depthMapWithTool: true,
   wandMatch: 'color' as WandMatch,
   wandContiguous: true,
+  selBrush: 1,
   fillContiguous: true,
   sel: new Set<number>(),
   float: null as Floating | null,
@@ -281,6 +282,20 @@ function transformSelection(xf: ShapeXf) {
     it.tile = { ...it.tile, ...t };
   }
   renderAll();
+}
+
+/** The tiles a selection brush of the current size covers, centred on (x, y). */
+function brushCells(x: number, y: number): number[] {
+  const n = state.selBrush, o = Math.floor((n - 1) / 2);
+  const out: number[] = [];
+  for (let dx = 0; dx < n; dx++)
+    for (let dy = 0; dy < n; dy++) {
+      const cx = x - o + dx, cy = y - o + dy;
+      // larger brushes are round
+      if (n > 2 && (dx - (n - 1) / 2) ** 2 + (dy - (n - 1) / 2) ** 2 > (n / 2) ** 2) continue;
+      if (inBounds(cx, cy)) out.push(pack(cx, cy));
+    }
+  return out;
 }
 
 function setSelection(cells: Iterable<number>, mode: 'replace' | 'add' | 'subtract') {
@@ -591,6 +606,11 @@ function renderCanvas() {
     if ((tool === 'draw' || tool === 'fill') && canPaintAt(h.x, h.y)) {
       s += `<path fill="${p.colors[state.color]}" fill-opacity="0.55" d="${tilePath(h.x, h.y, state.shape, state.angle)}"/>`;
     }
+    if (tool === 'paintSel')
+      for (const k of brushCells(h.x, h.y)) {
+        const [x, y] = unpack(k);
+        s += `<rect x="${x * TILE}" y="${y * TILE}" width="${TILE}" height="${TILE}" fill="var(--accent)" fill-opacity="0.2" stroke="var(--accent)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+      }
     if (['draw', 'erase', 'fill', 'depth', 'pick', 'wand'].includes(tool)) {
       const color = tool === 'erase' ? '#e5484d' : 'var(--accent)';
       s += `<rect x="${h.x * TILE}" y="${h.y * TILE}" width="${TILE}" height="${TILE}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
@@ -687,6 +707,13 @@ canvas.addEventListener('pointerdown', (e) => {
       drag = { kind: 'marquee', x0: c.x, y0: c.y, x1: c.x, y1: c.y, moved: false, mode: e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace' };
       break;
     }
+    case 'paintSel': {
+      commitFloat();
+      const subtract = e.altKey || e.button === 2;
+      drag = { kind: 'paintSel', subtract, last: null };
+      applyDrag(t);
+      break;
+    }
     case 'wand': {
       commitFloat();
       if (!inBounds(t.x, t.y)) return;
@@ -755,6 +782,9 @@ function applyDrag(t: { x: number; y: number }) {
       depthTile(x, y, drag.invert);
     });
     drag.last = t;
+  } else if (drag.kind === 'paintSel') {
+    walkLine(drag.last, t, (x, y) => setSelection(brushCells(x, y), drag.subtract ? 'subtract' : 'add'));
+    drag.last = t;
   } else if (drag.kind === 'move') {
     state.float!.dx = drag.dx + (t.x - drag.sx);
     state.float!.dy = drag.dy + (t.y - drag.sy);
@@ -805,6 +835,7 @@ canvas.addEventListener('pointercancel', endDrag);
 const TOOLS: { id: Tool; label: string; icon: string; key: string; help: string }[] = [
   { id: 'move', label: 'Move', icon: '✥', key: 'V', help: 'Drag or use the arrow keys (Shift = 4 tiles). Moves the whole drawing when nothing is selected. Enter drops.' },
   { id: 'select', label: 'Select', icon: '⬚', key: 'M', help: 'Drag a rectangle. Shift adds, Alt subtracts. Ctrl+A all, Ctrl+D none, Ctrl+Shift+I invert. Ctrl+drag moves.' },
+  { id: 'paintSel', label: 'Paint sel.', icon: '◌', key: 'L', help: 'Paint over tiles to add them to the selection. Alt or right-drag removes. Ctrl+D clears, Ctrl+drag moves.' },
   { id: 'wand', label: 'Wand', icon: '✦', key: 'W', help: 'Click to select matching tiles. Shift adds, Alt subtracts.' },
   { id: 'draw', label: 'Draw', icon: '✎', key: 'B', help: 'Left paints, right erases, Alt+click picks.' },
   { id: 'erase', label: 'Erase', icon: '⌫', key: 'E', help: 'Drag to erase tiles.' },
@@ -948,6 +979,13 @@ function renderOptions() {
     ])}${chk('wandContiguous', state.wandContiguous, 'Contiguous')}`;
   } else if (state.tool === 'fill') {
     opts = chk('fillContiguous', state.fillContiguous, 'Contiguous');
+  } else if (state.tool === 'paintSel') {
+    opts = `<span class="opt-label">Brush</span>${seg('selBrush', String(state.selBrush), [
+      ['1', '1'],
+      ['2', '2'],
+      ['3', '3'],
+      ['5', '5'],
+    ])}`;
   }
   $('optionsbar').innerHTML = `<span class="opt-tool">${t.icon} ${t.label}</span>${opts}<span class="opt-help">${t.help}</span>`;
 }
@@ -955,7 +993,8 @@ function renderOptions() {
 $('optionsbar').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('button[data-opt]');
   if (!b) return;
-  (state as any)[b.dataset.opt!] = b.dataset.val;
+  const opt = b.dataset.opt!;
+  (state as any)[opt] = typeof (state as any)[opt] === 'number' ? +b.dataset.val! : b.dataset.val;
   renderOptions();
   renderCanvas();
 });
@@ -1038,7 +1077,7 @@ $('palette').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('.swatch');
   if (!b) return;
   state.color = +b.dataset.color!;
-  if (['erase', 'pick', 'select', 'wand', 'move'].includes(state.tool)) setTool('draw');
+  if (['erase', 'pick', 'select', 'paintSel', 'wand', 'move'].includes(state.tool)) setTool('draw');
   renderPanels();
   renderCanvas();
 });
